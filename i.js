@@ -13,8 +13,19 @@ function iJS (conf = null) {
 }
 class Ijs {
     constructor() {
-        this.timer = new Date();
-        this.apiObject = new Ijs_Array();
+        window.state = {};
+        this.textContentReg = /{([\s\S]*?)}/gm;
+        this.numberReg = /\.([0-9]*?)\./gm;
+        this.classPathReg = /{{([\s\S]*?)}}/gm;
+        this.paramsReg = /\(([\s\S][^(]*?)\)/gm;
+        this.maksParamsReg = /\((.*)\)/gm;
+        this.maksKeysReg = /\[(.*)\]/gm;
+        this.funcReg = /^([\s\S]*?)\(/gm;
+
+        this.apis = {
+            objects: [],
+            keys: {},
+        };
         this.events = [];
         this.classes = [];
         this.data = [];
@@ -27,25 +38,23 @@ class Ijs {
             objects: []
         };
         this.models = new Ijs_Object();
-        this.textContentReg = /{([\s\S]*?)}/gm;
-        this.numberReg = /\.([0-9]*?)\./gm;
-        this.classPathReg = /{{([\s\S]*?)}}/gm;
-        this.paramsReg = /\(([\s\S][^(]*?)\)/gm;
-        this.maksParamsReg = /\((.*)\)/gm;
-        this.funcReg = /^([\s\S]*?)\(/gm;
         this.updateTimer = null;
         this.updateIds = {};
         this.updateConditionIds = {};
         this.updateIfIds = {};
+        this.updateApiIds = {};
+        this.tmp = {};
         this.LocalDataInit({
             loading: {},
         });
+        // this.models.addFunctions({set: this.SetData});
+        // window.state.$f = this.models.functions;
         this.Run();
     }
     //INIT CONF
     ConfInit = (conf) => {
         if (conf.methods) this.models.addFunctions(conf.methods);
-        window.$f = this.models.functions;
+        window.state.$f = this.models.functions;
         if (conf.data) this.LocalDataInit(conf.data);
     }
     //INIT APLICATION
@@ -64,7 +73,7 @@ class Ijs {
             model: data,
             id: '$'
         });
-        window.$ = this.models.items.$.$;
+        window.state.$ = this.models.items.$.$;
     }
     //Init local Data
     LocalDataInit = (data) => {
@@ -72,35 +81,43 @@ class Ijs {
         this.ModelInit('$');
     }
     api = (id) => {
-        return this.apiObject.items.find(api => api.id == id);
+        return this.apis.objects.find(api => api.id == id);
     }
     //FIND TAG API FOR GET INFORMATION
-    ApiInit = (api) => {
+    ApiInit = (pconf) => {
+        const api = pconf.node;
         const conf = {
           url: api.getAttribute('url') ? api.getAttribute('url') : null,
           method: api.getAttribute('method') ? api.getAttribute('method') : 'GET',
-          action: api.getAttribute('action') ? api.getAttribute('action') : 'READ',
+          action: api.getAttribute('action') ? api.getAttribute('action').toUpperCase() : 'READ',
           data: api.getAttribute('data') ? api.getAttribute('data') : '{}',
           model: api.getAttribute('model') ? api.getAttribute('model') : null,
           id: api.getAttribute('id') ? api.getAttribute('id') : api.getAttribute('model') ? api.getAttribute('model') : null,
           credentials: api.hasAttribute('credentials') ? true : false,
           localStorage: api.hasAttribute('localStorage') ? true : false,
+          parent_id: pconf.parent_id,
         };
 
-        if (this.api(conf.id)) return;
-        
+        if (this.api(conf.id)) {
+            this.api(conf.id).active = true;
+            this.api(conf.id).reData(conf);
+            return;
+        }
         let loading = {};
         loading[conf.id] = false;
         this.LocalDataUpdate({loading});
-        this.apiObject.add(new Ijs_API(conf));
+        const obj = new Ijs_API(conf, this);
+        this.apis.objects.push(obj);
     }
     GetPageNode = () => {
         return this.helps.objects.find(data => data.tagName === 'PAGE');
     }
     AddCatchHref = () => {
         document.addEventListener('click', event => {
-            if (this.GetPageNode() && event.target.tagName === 'A' && event.target.getAttribute('href')) {
-                const url = event.target.getAttribute('href');
+
+            const a = event.target.closest('a');
+            if (a && a.getAttribute('href') && this.GetPageNode()) {
+                const url = a.getAttribute('href');
                 if (url != location.pathname) {
                     aapi({ url, dataType: 'html' }, (answer) => {
                         let parser = new DOMParser();
@@ -135,26 +152,30 @@ class Ijs {
             conf.path = `${conf.path}${conf.node.getAttribute('path')}.`;
         }
         if (conf.node.tagName === 'MODEL' && !conf.model) {
-            conf.model = conf.node.getAttribute('path');
+            conf.model = conf.node.getAttribute('path').split('.')[0];
         }
         if (conf.node.tagName === 'API') {
-            this.ApiInit(conf.node);
+            this.ApiInit(conf);
         } else if (conf.node.tagName === 'IF') {
             this.IfNode(conf);
         } else if (conf.node.tagName === 'FOR') {
             this.ForNode(conf);
+        } else if (conf.node.tagName === 'PAGE') {
+            this.PagePlaceInit(conf);
         } else if (
             conf.node.tagName === 'ELSEIF'
             || conf.node.tagName === 'ELSE'
             || conf.node.tagName === 'STYLE'
             || conf.node.tagName === 'DATA'
             || conf.node.tagName === 'SCRIPT'
+            || conf.node.tagName === 'CODE'
         ) {
             //DO NOTHING
-        } else if (conf.node.tagName === 'INPUT' || conf.node.tagName === 'TEXTAREA' || conf.node.tagName === 'SELECT') {
+        } else if (conf.node.tagName === 'INPUT' || conf.node.tagName === 'TEXTAREA') {
             this.InputNode(conf);
-        } else if (conf.node.tagName === 'PAGE') {
-            this.PagePlaceInit(conf);
+        } else if (conf.node.tagName === 'SELECT') {
+            this.ForNode(conf);
+            this.InputNode(conf);
         } else {
             this.ClassicNode(conf);
         }
@@ -187,12 +208,16 @@ class Ijs {
         let paramValue;
         let data = conf.attr.nodeValue; 
         while ((paramValue = this.classPathReg.exec(conf.attr.nodeValue)) != null) {
-            data = data.replace(paramValue[0],`${conf.path}${paramValue[1]}`);
+            data = data.replace(paramValue[0],this.RePref({
+                data: paramValue[1],
+                pref: conf.path
+            }));
         }
         conf.attr.nodeValue = data;
         while ((paramValue = this.numberReg.exec(conf.attr.nodeValue)) != null) {
             data = data.replace(paramValue[0],`[${paramValue[1]}].`);
         }
+        data = data.split('$f').join('state.$f');
         
         const obj = new IjsClassDom({
             data,
@@ -208,15 +233,26 @@ class Ijs {
     }
     AddEvent = (conf) => {
         if (conf.attr.nodeName === 'click') {
-            conf.node.addEventListener('click', () => { this.ClickEvent(conf); });
+            conf.node.addEventListener('click', () => { this.DefClick(conf); });
+        } else if (conf.attr.nodeName === 'thisclick') {
+            conf.node.addEventListener('click', (e) => { this.ThisClick(conf, e); });
+        } else if (conf.attr.nodeName === 'keyup') {
+            conf.node.addEventListener('keyup', (e) => { this.KeyEvent(conf, e); });
         }
     }
+    KeyEvent = (conf, e) => {
+        this.ClickEvent(conf);
+    }
+    DefClick = (conf) => {
+        this.ClickEvent(conf);
+    }
+    ThisClick = ({attr, path, node}, e) => {
+        if (e.target != node) return;
+        this.ClickEvent({attr, path});
+    }
     ClickEvent = ({attr, path}) => {
-        let paramFunc, paramValue;
+        let paramFunc;
         let data = attr.nodeValue;
-        while (( paramValue = this.textContentReg.exec(data)) != null) {
-            data = data.replace(paramValue[0], `${path}${paramValue[1]}`);
-        }
         let is_set;
         const funcs = data.split(';');
         funcs.forEach(func => {
@@ -224,21 +260,39 @@ class Ijs {
             while (( paramFunc = this.funcReg.exec(func)) != null) {
                 if (paramFunc[1] === 'set') {
                     is_set = true;
-                    while (( paramValue = this.maksParamsReg.exec(func))!= null) {
-                        let params = GetParamsFromString(paramValue[1]);
-                        params[0] = `${params[0].substring(0,2) != '$.' ? path : ''}${params[0]}`;
-                        this.SetData(...params);
+                    let { params } = this.ParseData({
+                        data: func,
+                        pref: path
+                    });
+                    if (!params) return;
+                    params = GetParamsFromString(params[1]);
+                    if (params.length < 2) return;
+
+                    const answer = this.ParseData({
+                        data: params[0],
+                        pref: path
+                    });
+                    params[0] = answer.data;
+                    if (params[1][0] == '\\') {
+                        params[1] = params[1].slice(1);
+                    } else {
+                        params[1] = this.GetData({ name: params[1], pref: path });
                     }
+                    this.SetData(...params);
                 }
             }
             if (!is_set) {
-                this.GetData(`$f.${func}`);
+                this.GetData({ name: func, pref: path });
             }
         });
     }
     
     AnalyzeAttribute = (conf) => {
-        if (conf.attr.nodeName === 'click') {
+        if (
+            conf.attr.nodeName === 'click'
+            || conf.attr.nodeName === 'thisclick'
+            || conf.attr.nodeName === 'keyup'
+        ) {
             this.AddEvent(conf);
             return;
         } else if (conf.attr.nodeName === ':class') {
@@ -253,19 +307,9 @@ class Ijs {
         while ((nodeValue = this.textContentReg.exec(conf.attr.nodeValue)) != null) {
             const model = conf.model ? conf.model : nodeValue[1].trim().split('.')[0];
             let data = nodeValue[1].trim();
-            while ((paramValueTmp = this.paramsReg.exec(data)) != null) {
-                paramValue = paramValueTmp;
-            }
-            if (paramValue && data.split('.')[0] !== '$f') {
-                data = `$f.${data.replace(
-                    paramValue[1],
-                    paramValue[1].split(',').map(item => `${conf.path}${item.trim()}`).join(',')
-                )}`;
-            } else {
-                data = `${conf.path}${data}`;
-            }
             const obj = {
                 node: conf.node,
+                path: conf.path,
                 model,
                 data,
                 mask: nodeValue[0],
@@ -279,7 +323,7 @@ class Ijs {
             };
             this.AddNode(obj);
             need_clean = true;
-            new_data = new_data.replace(obj.mask, this.GetData(obj.data));
+            new_data = new_data.replace(obj.mask, this.GetData({ name: obj.data, pref: obj.path }));
         }
         if (need_clean && conf.attr.nodeName !== 'textContent') conf.node.setAttribute(conf.attr.nodeName, new_data);
         else if (need_clean) {
@@ -290,11 +334,11 @@ class Ijs {
     ForNode = (conf) => {
         for (let i = 0; i < conf.node.attributes.length; i++) {
             if (conf.node.attributes[i].nodeName !== 'items') {
-                this.AnalyzeAttribute({
-                    ...conf,
-                    attr: conf.node.attributes[i],
-                    i
-                });
+                // this.AnalyzeAttribute({
+                //     ...conf,
+                //     attr: conf.node.attributes[i],
+                //     i
+                // });
             } else if (conf.node.attributes[i].nodeName === 'items') {
                 const obj = new IjsForDom({
                     node: conf.node,
@@ -350,11 +394,12 @@ class Ijs {
                 }
                 if (nodeValue) {
                     const model = conf.model ? conf.model : nodeValue[1].trim().split('.')[0];
-                    let data = `${conf.path}${nodeValue[1].trim()}`;
+                    let data = nodeValue[1].trim();
                     if (nodeValue[1].trim()) {
                         const obj = new IjsInputDom({
                             node: conf.node,
                             model,
+                            path: conf.path,
                             mask: nodeValue[0],
                             input: nodeValue.input,
                             data,
@@ -373,6 +418,17 @@ class Ijs {
                     ...conf,
                     attr: conf.node.attributes[i],
                     i
+                });
+            }
+        }
+        if (conf.node.children.length !== 0) {
+            for( let i = 0; i < conf.node.children.length; i++) {
+                this.NodeAnalyze({
+                    ...conf,
+                    node: conf.node.children[i],
+                    pref: conf.pref + conf.index,//`${conf.pref}${String.fromCharCode(conf.index)}`,
+                    index: i,
+                    three_id: conf.three_id + 1,
                 });
             }
         }
@@ -408,39 +464,29 @@ class Ijs {
     }
     AddNode = (obj) => {
         this.data.push(obj);
-        let datas, paramValue, paramValueTmp;
-        while ((paramValueTmp = this.paramsReg.exec(obj.data)) != null) {
-            paramValue = paramValueTmp;
-        }
-        if (paramValue) {
-            datas = paramValue[1].split(',').map(item => item.trim());
-        } else {
-            datas = [obj.data];
-        }
+        const datas = this.ParseKeys({ data: obj.data, pref: obj.path, log: obj.obj == 'input' });
         datas.forEach(data => {
+            data = data.split('.');
+            if (data[0] == 'state') data = data.slice(1);
+            data = data.join('.');
             if (!this.keys[data]) this.keys[data] = [];
             if (this.keys[data].indexOf(obj.id) === -1) this.keys[data].push(obj.id);
         });
     }
     AddIfCondition = (obj) => {
         this.helps.data.push(obj);
-        if (!this.helps.keys[obj.data]) this.helps.keys[obj.data] = [];
-        if (this.helps.keys[obj.data].indexOf(obj.id) === -1) this.helps.keys[obj.data].push(obj.id);
-        if (!this.helps.helpKeys[obj.data]) this.helps.helpKeys[obj.data] = [];
-        if (this.helps.helpKeys[obj.data].indexOf(obj.ifId) === -1) this.helps.helpKeys[obj.data].push(obj.ifId);
+        const datas = this.ParseKeys({ data: obj.data, pref: obj.path, state: true });
+        datas.forEach(data => {
+            if (!this.helps.keys[data]) this.helps.keys[data] = [];
+            if (this.helps.keys[data].indexOf(obj.id) === -1) this.helps.keys[data].push(obj.id);
+            if (!this.helps.helpKeys[data]) this.helps.helpKeys[data] = [];
+            if (this.helps.helpKeys[data].indexOf(obj.ifId) === -1) this.helps.helpKeys[data].push(obj.ifId);
+        });
     }
     AddHelpNode = (obj) => {
         this.helps.objects.push(obj);
         if (obj.data) {
-            let datas, paramValue, paramValueTmp;
-            while ((paramValueTmp = this.paramsReg.exec(obj.data)) != null) {
-                paramValue = paramValueTmp;
-            }
-            if (paramValue) {
-                datas = paramValue[1].split(',').map(item => item.trim());
-            } else {
-                datas = [obj.data];
-            }
+            const datas = this.ParseKeys({ data: obj.data, pref: obj.path, state: true });
             datas.forEach(data => {
                 if (!this.helps.helpKeys[data]) this.helps.helpKeys[data] = [];
                 if (this.helps.helpKeys[data].indexOf(obj.id) === -1) this.helps.helpKeys[data].push(obj.id);
@@ -448,7 +494,7 @@ class Ijs {
         }
     }
     UpdateState = (path) => {
-        //console.log(path);
+        // console.log(path);
         if (this.keys[path]) {
             this.keys[path].forEach(id => this.updateIds[id] = 1);
         }
@@ -458,16 +504,22 @@ class Ijs {
         if (this.helps.helpKeys[path]) {
             this.helps.helpKeys[path].forEach(id => this.updateIfIds[id] = 1);
         }
-        
+        if(this.apis.keys[path]) {
+            this.apis.keys[path].forEach(id => this.updateApiIds[id] = 1);
+        }
         clearTimeout(this.updateTimer);
         this.updateTimer = setTimeout(() => {
+            this.tmp = {};
             this.ChangeInit();
             this.updateIds = {};
             this.updateConditionIds = {};
             this.updateIfIds = {};
+            this.updateApiIds = {};
         },0);
     }
     ChangeInit = () => {
+        const date = new Date();
+        Object.keys(this.updateApiIds).forEach(id => this.api(id).reData());
         let reInit = true;
         while (reInit) {
             const uniqueConditionIds = Object.keys(this.updateConditionIds);
@@ -494,11 +546,6 @@ class Ijs {
         const uniqueIds = this.GetUniqueIds(model, this.data, 'id');
         this.DataInit(uniqueIds, this.data);
         this.ReClass();
-
-        // this.updateIds = {};
-        // this.updateConditionIds = {};
-        // this.updateIfIds = {};
-        // console.log(new Date() - this.timer);
     }
     GetUniqueIds = (model, data, id) => {
         const allItems = data.filter(item => item.model === model);
@@ -530,7 +577,7 @@ class Ijs {
         uniqueIds.forEach(id => {
             const items = data.filter(item => item.id === id);
             items.forEach(item => {
-                const result = this.GetData(item.data, item.attr === 'condition');
+                const result = this.GetData({ name: item.data, pref: item.path, not_null: item.attr === 'condition' });
                 if ( !results[item.id] ) {
                     results[item.id] = {
                         node: item.node,
@@ -564,35 +611,104 @@ class Ijs {
         }
     }
     ModifyPathName = (name) => {
-        const path = name.trim().split('.');
-        if (path[0] === '$d' || path[0] === '$f') {
+        const path = name.toString().trim().split('.');
+        if (path[0] === 'state' || path[0] === '$f') {
             return name
-                .replace('$d', `items.${path[1]}`)
+                .replace('state', `items.${path[1]}`)
                 .replace('$f', 'functions');
         } else {
             return `items.${path[0]}.${name}`;
         }
     }
-    GetFuncData = (model, params) => {
+    GetFuncData = ({ model, params, pref }) => {
         if (!params) return model();
 
-        params = GetParamsFromString(params).map(param => {
-            return this.GetData(param);
+        params = GetParamsFromString(params).map(name => {
+            return this.GetData({ name, pref });
         });
         return model(...params);
     }
-    GetData = (name, not_null = false) => {
-        let paramValue, helpParamValue;
-        while ((helpParamValue = this.maksParamsReg.exec(name)) != null) {
-            paramValue = helpParamValue;
-            name = name.replace(paramValue[0],'');
-        }
+    ParseKeys = ({ pref, data, log }) => {
+        const res = this.ParseData({ data, pref, state: true });
+        let tmpKeys = [];
+        let keys = [];
+        let keysTmp;
+        if (res.params) {
+            GetParamsFromString(res.params[1]).forEach(item => {
+                keys = [
+                    ...keys,
+                    ...this.ParseKeys({ data: item, pref})
+                ];
+            });
+        } else {
+            while ((keysTmp = this.maksKeysReg.exec(res.data)) != null) {
+                tmpKeys.push(keysTmp[1]);
+            }
+            
+            if (tmpKeys.length === 0) {
+                keys.push(res.data);
+            }
 
-        const path = this.ModifyPathName(name).trim().split('.');
+            tmpKeys.forEach(key => {
+                keys = [
+                    ...keys,
+                    ...this.ParseKeys({ data: key, pref, reget: true})
+                ];
+            });
+        }
+        return keys;
+    }
+    ReKeys = ({ data, pref }) => {
+        let keysTmp, findKeysTmp;
+        while ((keysTmp = this.maksKeysReg.exec(data)) != null) {
+            findKeysTmp = keysTmp;
+        }
+        if (findKeysTmp) {
+            data = data.replace(findKeysTmp[0], `.${this.GetData({ name: findKeysTmp[1], pref})}`);
+        }
+        return data;
+    }
+    ParseData = ({ pref, data, state }, isRePref = false) => {
+        data = this.ReKeys({ pref, data });
+        let tmp,paramValueTmp;
+        while ((paramValueTmp = this.maksParamsReg.exec(data)) != null) {
+            tmp = paramValueTmp;
+        }
+        if (tmp) {
+            return { data: `$f.${data.replace(tmp[0], isRePref ? '()' : '')}`, params: tmp };
+        }
+        const path = data.split('.');
+        if (path[0] == 'state') return state ? { data: path.slice(1).join('.'), params: null} : { data, params: null };
+        while ((paramValueTmp = this.maksParamsReg.exec(pref)) != null) {
+            tmp = paramValueTmp;
+        }
+        if (tmp) {
+            return { data: `${pref.replace(tmp[0], isRePref ? '()' : '')}${data}`, params: tmp };
+        }
+        return { data: isRePref ? `state.${pref}${data}` : `${pref}${data}`, params: null };
+    }
+    RePref = ({ pref, data }) => {
+        let answer = this.ParseData({ data, pref }, true);
+        if (answer.params) {
+            answer.data = answer.data.replace('()',
+                `(${GetParamsFromString(answer.params[1]).map(data => {
+                    return this.RePref({ data, pref });
+                }).join(',')})`
+            );
+        }
+        return answer.data;
+    }
+    GetData = ({ name, pref, not_null }) => {
+        pref = pref ? pref : '';
+        not_null = not_null ? not_null : false;
+        let { data, params } = this.ParseData({ data: name, pref });
+        let path = this.ModifyPathName(data).trim().split('.');
         let model = this.models;
+        let cache = '';
         for (var i in path) {
+            cache = cache ? `${cache}.${path[i]}` : path[i];
             if (path[i] == '*')
-                return model;
+                return this.CleanData(model);
             if (isFinite(model))
                 return parseFloat(model);
             if (model == path[i])
@@ -600,32 +716,76 @@ class Ijs {
             else if (model[path[i]] || model[path[i]] == 0) {
                 model = model[path[i]];
                 if (typeof model == 'function') {
-                    model = this.GetFuncData(model, paramValue ? paramValue[1] : '')
+                    if (!this.tmp[cache]) {
+                        model = this.GetFuncData({ model, pref, params: params ? params[1] : '' });
+                        this.tmp[cache] = model;
+                        setTimeout(() => {
+                            delete this.tmp[cache];
+                        },100);
+                    } else {
+                        model = this.tmp[cache];
+                    }
                 }
             } else 
                 return model[path[i]];
         }
-        if (!not_null) return model;
-        else if (!model) return null;
-        else if (typeof model === 'object') return true;
+        if (!not_null) return this.CleanData(model);
+        if (!model) return null;
+        else if (typeof model === 'object') {
+            if (!Array.isArray(model)) {
+                if (Object.keys(model).length === 0) return false;
+                return true;
+            } else if (model.length === 0 || model === undefined || model === null) return false;
+            else return true;
+        }
         else if (typeof model === 'string') return `'${model}'`;
         return model;
+    }
+    CleanData = (model) => {
+        if (typeof model == 'object') {
+            if (Array.isArray(model)) {
+                let newModel = [];
+                for (const i in model) {
+                    if (i !== '__data') {
+                        newModel[i] = this.CleanData(model[i]);
+                    }
+                }
+                return newModel;
+            } else if (model !== undefined && model !== null) {
+                let newModel = {}
+                for (const i in model) {
+                    if (i !== '__data') {
+                        newModel[i] = this.CleanData(model[i]);
+                    }
+                }
+                return newModel;
+            } else {
+                return model;
+            }
+        }  else {
+            return model;
+        }
     }
     SetData = (name, data) => {
         let model = this.models;
         const path = this.ModifyPathName(name).trim().split('.');
+        // console.log(path);
         for (var i in path) {
-          if (model[path[i]] && i < path.length - 1 ) {
-            model = model[path[i]];
-          } else if (path.length - 1 == i) {
-            model[path[i]] = data;
-          } else {
-            return false;
-          }
+            if (model[path[i]] && i < path.length - 1 ) {
+                model = model[path[i]];
+            } else if (path.length - 1 == i) {
+                model[path[i]] = data;
+            } else {
+                model[path[i]] = {};
+                model = model[path[i]];
+                console.log(`false ${path[i]}`);
+            }
         }
     }
 
     CleanKeys = (id) => {
+        //apis
+        this.apis.objects.filter(api => api.parent_id == id).forEach(api => api.active = false);
         //classses
         this.classes = this.classes.filter(item => item.parent_id !== id);
         //data
@@ -693,6 +853,7 @@ class Ijs {
   function ObjectAssign(originObj, newObj) {
     for (let i in newObj) {
         if (i != '__data') {
+            if (originObj === null) originObj = {};
             if (Array.isArray(newObj[i])) {
                 originObj[i] = [];
                 newObj[i].forEach(obj => {
@@ -715,7 +876,11 @@ class Ijs {
   }
   
   class Ijs_API {
-    constructor (api) {
+    constructor (api, self) {
+        this.self = self;
+        this.active = true;
+        this.timerId = null;
+        this.dataPathReg = /{{([\s\S]*?)}}/gm;
         this.url = api.url;
         this.method = api.method;
         this.action = api.action;
@@ -723,36 +888,73 @@ class Ijs {
         this.id = api.id;
         this.localStorage = api.localStorage;
         this.load = false;
-        let json;
-        eval(`json = ${api.data};`);
-        this.data = json;
-        if (this.localStorage) {
-            const model = JSON.parse(localStorage.getItem(this.id) ? localStorage.getItem(this.id) : 'null');
-            if (model) {
-                setTimeout(() => {
-                    this.dataInit({
-                        model,
-                        id: this.id
-                    });
-                },0);
+        this.parent_id = api.parent_id;
+        let paramValue;
+        this.jsonData = api.data; 
+        while ((paramValue = this.dataPathReg.exec(api.data)) != null) {
+            this.jsonData = this.jsonData.replace(paramValue[0], paramValue[1]);
+            paramValue[1] = paramValue[1].replace('state.','');
+            if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
+            if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
+                this.self.apis.keys[paramValue[1]].push(this.id);
             }
         }
+        setTimeout(() => {
+            let json;
+            eval(`json = ${this.jsonData};`);
+            this.data = json;
+            if (this.localStorage) {
+                const model = JSON.parse(localStorage.getItem(this.id) ? localStorage.getItem(this.id) : 'null');
+                if (model) {
+                    setTimeout(() => {
+                        this.dataInit({
+                            model,
+                            id: this.id
+                        });
+                    },0);
+                }
+            }
+            if (this.action === 'READ') this.init();
+        },0);
+    }
+    reData = (conf) => {
+        clearTimeout(this.timerId);
+        const _this = this;
+        this.timerId = setTimeout(() => {
+            if (!_this.active) return;
+            let modify = false;
+            let json;
+            eval(`json = ${_this.jsonData};`);
+            if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
+                _this.data = json;
+                modify = true;
+            }
+            if (conf && _this.url != conf.url) {
+                _this.url = conf.url
+                modify = true;
+            }
+            if (modify && _this.action !== 'SEND') {
+                _this.send();
+            }
+        },10);
     }
     changeData = (data) => {
         this.data = ObjectAssign(this.data, data);
         return this;
     }
-    send = () => {
+    send = (conf) => {
         window.ijs.SetData(`$.loading.${this.id}`, false);
-        this.init();
+        this.init(conf);
         return this;
     }
-    init = () => {
+    init = (conf) => {
         aapi({
             url: this.url,
             method: this.method,
             data: this.data,
-        }, this.onload, this.onerror);
+        },
+        conf && conf.success ? conf.success : this.onload,
+        conf && conf.error ? conf.error : this.onerror);
     }
     onload = (response) => {
         this.load = true;
@@ -778,13 +980,53 @@ class Ijs {
             model,
             id
         });
-        window[id] = window.ijs.models.items[id][id];
+        window.state[id] = window.ijs.models.items[id][id];
         window.ijs.ModelInit(id);
     }
     onerror = (status, response) => {
-      console.error(`Errror: ${status} ${response}`);
+        localStorage.removeItem(this.id);
+        this.dataInit({
+            model: null,
+            id: this.id
+        });
     }
   }
+
+async function jspi(api) {
+    return new Promise(function (resolve, reject) {
+        this.url = api.url;
+        this.data = api.data;
+        this.method = api.method ? api.method : 'GET';
+        let xhr = new XMLHttpRequest();
+        if (this.method !== 'GET') {
+            xhr.open(this.method, this.url);
+        } else {
+            let p = '';
+            for (i in this.data) {
+                p = p ? `${p}&` : p;
+                p = `${p}${i}=${encodeURI(this.data[i])}`;
+            }
+            xhr.open(this.method, `${this.url}?${p}`);
+        }
+        if (!api.dataType || api.dataType != 'html')
+            xhr.responseType = api.dataType ? api.dataType : 'json';
+        if (this.credentials) xhr.withCredentials = true;
+        xhr.send(JSON.stringify(this.data));
+        xhr.onload = function() {
+            resolve(xhr.response);
+        };
+        xhr.onerror = function() {
+            reject({status: xhr.status, response: xhr.response});
+        };
+        xhr.onprogress = function(event) { // запускается периодически
+            // event.loaded - количество загруженных байт
+            // event.lengthComputable = равно true, если сервер присылает заголовок Content-Length
+            // event.total - количество байт всего (только если lengthComputable равно true)
+            // console.log(`Загружено ${event.loaded} из ${event.total}`);
+        };
+    });
+    
+}
 
 function aapi(api, callback = null, callbackError = null) {
     this.url = api.url;
@@ -793,6 +1035,8 @@ function aapi(api, callback = null, callbackError = null) {
     let xhr = new XMLHttpRequest();
     if (this.method !== 'GET') {
         xhr.open(this.method, this.url);
+        // xhr.setRequestHeader('Content-Type', 'multipart/form-data; boundary=' + boundary);
+        // xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
     } else {
         let p = '';
         for (i in this.data) {
@@ -804,9 +1048,34 @@ function aapi(api, callback = null, callbackError = null) {
     if (!api.dataType || api.dataType != 'html')
         xhr.responseType = api.dataType ? api.dataType : 'json';
     if (this.credentials) xhr.withCredentials = true;
-    xhr.send(JSON.stringify(this.data));
+    if (this.method == 'GET') {
+        xhr.send(JSON.stringify(this.data));
+    } else {
+        // var boundary = String(Math.random()).slice(2);
+        // var boundaryMiddle = '--' + boundary + '\r\n';
+        // var boundaryLast = '--' + boundary + '--\r\n'
+
+        // var body = ['\r\n'];
+        // for (var key in this.data) {
+        //     // добавление поля
+        //     body.push('Content-Disposition: form-data; name="' + key + '"\r\n\r\n' + this.data[key] + '\r\n');
+        // }
+
+        // body = body.join(boundaryMiddle) + boundaryLast;
+        // xhr.send(body);
+        var formData = new FormData();
+        for (var key in this.data) {
+            formData.append(key, this.data[key]);
+        }
+        xhr.send(formData);
+    }
+
     xhr.onload = function() {
-        if (callback) callback(xhr.response);
+        if (xhr.status === 200) {
+            if (callback) callback(xhr.response);
+        } else {
+            if (callbackError) callbackError(xhr.status, xhr.response);
+        }
     };
     xhr.onerror = function() {
         if (callbackError) callbackError(xhr.status, xhr.response);
@@ -889,7 +1158,9 @@ function InitData(init_data, path = '') {
 }
 
 function IjsInputDom(conf, self) {
+    this.obj = 'input';
     this.redata = 0;
+    this.path = conf.path ? conf.path : '';
     this.node = conf.node;
     this.model = conf.model;
     this.mask = conf.mask ? conf.mask : null;
@@ -911,32 +1182,33 @@ function IjsInputDom(conf, self) {
     if (this.node.tagName === 'SELECT') {
         this.attr = 'value';
         this.node.addEventListener('change', this.Change);
-        this.node.value = this.self.GetData(this.data);
+        this.node.value = this.self.GetData({ name: this.data, pref: this.path });
     } else if (this.node.tagName === 'TEXTAREA') {
         this.attr = 'value';
         this.node.addEventListener('keyup', this.Change);
-        this.node.value = this.self.GetData(this.data);
+        this.node.value = this.self.GetData({ name: this.data, pref: this.path });
     } else if (type == 'checkbox') {
         this.attr = 'checked';
         this.node.addEventListener('change', this.Checked);
-        this.node.checked = JSON.parse(this.self.GetData(this.data));
+        this.node.checked = JSON.parse(this.self.GetData({ name: this.data, pref: this.path }));
     }else if (type == 'radio') {
         this.attr = 'radio';
         this.node.addEventListener('change', this.Radio);
-        if (this.node.value == this.self.GetData(this.data)) {
+        if (this.node.value == this.self.GetData({ name: this.data, pref: this.path })) {
             this.node.checked = true;
         }
     } else {
         this.attr = 'value';
         this.node.addEventListener('keyup', this.Change);
-        this.node.value = this.self.GetData(this.data);
+        this.node.value = this.self.GetData({ name: this.data, pref: this.path });
     }
 }
 IjsInputDom.prototype.Checked = function(e) {
     const _this = this;
     clearTimeout(this.timerId);
     this.timerId = setTimeout(() => {
-      _this.self.SetData(_this.data, e.target.checked);
+        let { data } = _this.self.ParseData({ data: _this.data, pref: _this.path });
+        _this.self.SetData(data, e.target.checked);
     },1);
   }
 IjsInputDom.prototype.Radio = function(e) {
@@ -944,7 +1216,8 @@ IjsInputDom.prototype.Radio = function(e) {
     if (e.target.checked) {
       clearTimeout(this.timerId);
       this.timerId = setTimeout(() => {
-        _this.self.SetData(_this.data, e.target.value);
+        let { data } = _this.self.ParseData({ data: _this.data, pref: _this.path });
+        _this.self.SetData(data, e.target.value);
       },1);
     }
   }
@@ -952,8 +1225,9 @@ IjsInputDom.prototype.Change = function(e) {
     const _this = this;
     clearTimeout(this.timerId);
     this.timerId = setTimeout(() => {
-      _this.self.SetData(_this.data, e.target.value);
-    },100);
+        let { data } = _this.self.ParseData({ data: _this.data, pref: _this.path });
+        _this.self.SetData(data, e.target.value);
+    },1);
 }
 
 function IjsClassDom(conf) {
@@ -987,6 +1261,10 @@ function IjsForDom(conf, self) {
     this.self = self;
     this.textContentReg = /{([\s\S]*?)}/gm;
     this.paramsReg = /\(([\s\S]*?)\)/gm;
+    this.maksParamsReg = /\((.*)\)/gm;
+    this.maksContentReg = /{(.*)}/gm;
+    this.funcReg = /^([\s\S]*?)\(/gm;
+    
     this.helpNode = document.createElement('DIV');
     this.nodes = [];
     for( let i = 0; i < this.node.children.length; i++) {
@@ -994,29 +1272,21 @@ function IjsForDom(conf, self) {
     }
     this.node.innerHTML = '';
 
-    let nodeValue, nodeValueTmp, paramValue, paramValueTmp;
-    while ((nodeValueTmp = this.textContentReg.exec(this.node.getAttribute('items'))) != null) {
-        nodeValue = nodeValueTmp;
+    let nodeValueTmp;
+    this.data = this.node.getAttribute('items');
+    while ((nodeValueTmp = this.maksContentReg.exec(this.data)) != null) {
+        this.data = nodeValueTmp[1];
     }
-    if (nodeValue) {
-        this.model = this.model ? this.model : nodeValue[1].trim().split('.')[0];
-        this.data = nodeValue[1].trim();
-        while ((paramValueTmp = this.paramsReg.exec(this.data)) != null) {
-            paramValue = paramValueTmp;
-        }
-        if (paramValue && this.data.split('.')[0] !== '$f') {
-            this.data = `$f.${this.data.replace(
-                paramValue[1],
-                paramValue[1].split(',').map(item => `${this.path}${item.trim()}`).join(',')
-            )}`;
-        } else {
-            this.data = `${this.path}${this.data}`;
-        }
-        this.ReInit();
+
+    if (!this.model) {
+        this.model = this.data.trim().split('.')[0];
     }
+    this.newPath = this.self.RePref({ data: this.data, pref: this.path });
+
+    this.ReInit();
 }
 IjsForDom.prototype.ReInit = function() {
-    const items = this.self.GetData(this.data);
+    const items = this.self.GetData({ name: this.data, pref: this.path });
     if (!items) {
         console.error(`${this.data} not find`);
         return;
@@ -1031,7 +1301,7 @@ IjsForDom.prototype.ReInit = function() {
         });
         this.self.NodeAnalyze({
             node: this.helpNode,
-            path: `${this.data}.${key}.`,
+            path: `${this.newPath}.${key}.`,
             model: this.model,
             pref: this.pref + this.index,//`${this.pref}${String.fromCharCode(this.index)}`,
             index: key,
@@ -1056,6 +1326,7 @@ function IjsPageDom(conf, self) {
     this.parent_id = conf.parent_id ? conf.parent_id : null;
     this.self = self;
     this.helpNode = document.createElement('DIV');
+    this.waiter = 0;
 }
 IjsPageDom.prototype.rePage = function(page) {
     this.node.innerHTML = '';
@@ -1066,13 +1337,22 @@ IjsPageDom.prototype.rePage = function(page) {
         if (!script.hasAttribute('src')) {
             eval(script.innerHTML);
         } else {
-            aapi({ url: script.getAttribute('src'), dataType: 'html' }, (answer) => {
-                eval(answer);
-            });
+            this.waiter++;
+            jspi({ url: script.getAttribute('src'), dataType: 'html' })
+                .then((answer) => {
+                    eval(answer);
+                    this.waiter--;
+                    if (this.waiter === 0) this.reInit(page);
+                });
         }
     });
+    if (this.waiter === 0) this.reInit(page);
+}
+IjsPageDom.prototype.reInit = function(page) {
     for( let i = 0; i < page.children.length; i++) {
-        this.helpNode.append(page.children[i]);
+        if (page.children[i].tagName != 'SCRIPT') {
+            this.helpNode.append(page.children[i]);
+        }
     }
     this.self.NodeAnalyze({
         node: this.helpNode,
@@ -1167,20 +1447,11 @@ IjsIfDom.prototype.InitNode = function(node, key) {
     let new_data = attr.nodeValue;
     while ((nodeValue = this.textContentReg.exec(attr.nodeValue)) != null) {
         const model = this.model ? this.model : nodeValue[1].trim().split('.')[0];
-        let data = `${this.path}${nodeValue[1].trim()}`;
-        let paramValue, paramValueTmp;
-        while ((paramValueTmp = this.paramsReg.exec(data)) != null) {
-            paramValue = paramValueTmp;
-        }
-        if (paramValue && data.split('.')[0] !== '$f') {
-            data = `$f.${data.replace(
-                paramValue[1],
-                paramValue[1].split(',').map(item => `${this.path}${item.trim()}`).join(',')
-            )}`;
-        }
+        let data = nodeValue[1].trim();
         const obj = {
             node,
             model,
+            path: this.path,
             mask: nodeValue[0],
             input: nodeValue.input,
             data,
@@ -1191,7 +1462,7 @@ IjsIfDom.prototype.InitNode = function(node, key) {
         };
         this.self.AddIfCondition(obj);
         need_clean = true;
-        new_data = new_data.replace(obj.mask, this.self.GetData(obj.data, true));
+        new_data = new_data.replace(obj.mask, this.self.GetData({ name: obj.data, pref: this.path, not_null: true }));
     }
     if (need_clean) {
         node.setAttribute(attr.nodeName, new_data);
