@@ -30,6 +30,7 @@ class Ijs {
         this.classes = [];
         this.data = [];
         this.keys = {};
+        this.paths = {};
 
         this.helps = {
             data: [],
@@ -54,13 +55,25 @@ class Ijs {
     //INIT CONF
     ConfInit = (conf) => {
         if (conf.methods) this.models.addFunctions(conf.methods);
+        if (conf.watch) this.models.addWatch(conf.watch);
         window.state.$f = this.models.functions;
         if (conf.data) this.LocalDataInit(conf.data);
+        // this.ModelInit('*');
     }
     //INIT APLICATION
     Run = () => {
         this.PageAnalyze();
         this.AddCatchHref();
+        let _this = this;
+        window.onpopstate = function(event) {
+            aapi({ url: document.location, dataType: 'html' }, (answer) => {
+                let parser = new DOMParser();
+                let doc = parser.parseFromString(answer, "text/html").querySelector('page');
+                if (doc) {
+                    _this.GetPageNode().rePage(doc);
+                }
+            });
+        }
     }
     //INIT:)
     PageAnalyze = () => {
@@ -96,11 +109,12 @@ class Ijs {
           credentials: api.hasAttribute('credentials') ? true : false,
           localStorage: api.hasAttribute('localStorage') ? true : false,
           parent_id: pconf.parent_id,
+          path: pconf.path,
         };
 
         if (this.api(conf.id)) {
             this.api(conf.id).active = true;
-            this.api(conf.id).reData(conf);
+            this.api(conf.id).reConf(conf);
             return;
         }
         let loading = {};
@@ -116,7 +130,7 @@ class Ijs {
         document.addEventListener('click', event => {
 
             const a = event.target.closest('a');
-            if (a && a.getAttribute('href') && this.GetPageNode()) {
+            if (a && (!a.getAttribute('target') || a.getAttribute('target') != '_blank') && a.getAttribute('href') && this.GetPageNode()) {
                 const url = a.getAttribute('href');
                 if (url != location.pathname) {
                     aapi({ url, dataType: 'html' }, (answer) => {
@@ -140,7 +154,7 @@ class Ijs {
                 path: '',
                 model: '',
                 pref: 0,
-                index: 0,
+                index: i,
                 three_id: 0,
                 parent_id: ''
             });
@@ -217,8 +231,7 @@ class Ijs {
         while ((paramValue = this.numberReg.exec(conf.attr.nodeValue)) != null) {
             data = data.replace(paramValue[0],`[${paramValue[1]}].`);
         }
-        data = data.split('$f').join('state.$f');
-        
+        data = data.split('$f').join('state.$f').split('.*').join('');
         const obj = new IjsClassDom({
             data,
             parent_id: conf.parent_id,
@@ -238,6 +251,8 @@ class Ijs {
             conf.node.addEventListener('click', (e) => { this.ThisClick(conf, e); });
         } else if (conf.attr.nodeName === 'keyup') {
             conf.node.addEventListener('keyup', (e) => { this.KeyEvent(conf, e); });
+        } else if (conf.attr.nodeName === 'change') {
+            conf.node.addEventListener('change', (e) => { this.KeyEvent(conf, e); });
         }
     }
     KeyEvent = (conf, e) => {
@@ -275,6 +290,7 @@ class Ijs {
                     params[0] = answer.data;
                     if (params[1][0] == '\\') {
                         params[1] = params[1].slice(1);
+                        params[1] = IsJsonString(params[1]) ? JSON.parse(params[1]) : params[1];
                     } else {
                         params[1] = this.GetData({ name: params[1], pref: path });
                     }
@@ -292,6 +308,7 @@ class Ijs {
             conf.attr.nodeName === 'click'
             || conf.attr.nodeName === 'thisclick'
             || conf.attr.nodeName === 'keyup'
+            || conf.attr.nodeName === 'change'
         ) {
             this.AddEvent(conf);
             return;
@@ -328,7 +345,7 @@ class Ijs {
         if (need_clean && conf.attr.nodeName !== 'textContent') conf.node.setAttribute(conf.attr.nodeName, new_data);
         else if (need_clean) {
             conf.node.textContent = '';
-            conf.node.textContent = new_data;
+            conf.node.innerHTML = new_data;
         }
     }
     ForNode = (conf) => {
@@ -507,6 +524,7 @@ class Ijs {
         if(this.apis.keys[path]) {
             this.apis.keys[path].forEach(id => this.updateApiIds[id] = 1);
         }
+        this.paths[`watch.${path}`] = 1;
         clearTimeout(this.updateTimer);
         this.updateTimer = setTimeout(() => {
             this.tmp = {};
@@ -515,10 +533,10 @@ class Ijs {
             this.updateConditionIds = {};
             this.updateIfIds = {};
             this.updateApiIds = {};
+            this.paths = {};
         },0);
     }
     ChangeInit = () => {
-        const date = new Date();
         Object.keys(this.updateApiIds).forEach(id => this.api(id).reData());
         let reInit = true;
         while (reInit) {
@@ -532,6 +550,9 @@ class Ijs {
         this.DataInit(uniqueIds, this.data);
 
         this.ReClass();
+
+        const uniquePath = Object.keys(this.paths);
+        this.WatchInit(uniquePath);
     }
     ModelInit = (model) => {
         let reInit = true;
@@ -548,7 +569,7 @@ class Ijs {
         this.ReClass();
     }
     GetUniqueIds = (model, data, id) => {
-        const allItems = data.filter(item => item.model === model);
+        const allItems = data.filter(item => model === '*' || item.model === model);
         let uniqueIds = [];
 
         allItems.forEach(item => {
@@ -571,6 +592,11 @@ class Ijs {
         });
         return result;
     }
+    WatchInit = (uniquePath) => {
+        uniquePath.forEach(id => {
+            this.GetData({ name: id, pref: '' });
+        });
+    }
     DataInit = (uniqueIds, data) => {
         let results = {};
 
@@ -592,7 +618,8 @@ class Ijs {
         for (const i in results) {
             if(results[i].attr === 'textContent') {
                 results[i].node.innerHTML = '';
-                results[i].node.append(results[i].text);
+                results[i].node.innerHTML = results[i].text;
+                // results[i].node.append(results[i].text);
             } else {
                 if (results[i].attr == 'value' && results[i].node.tagName == 'SELECT') {
                     results[i].node.value = results[i].text;
@@ -616,6 +643,8 @@ class Ijs {
             return name
                 .replace('state', `items.${path[1]}`)
                 .replace('$f', 'functions');
+        } else if (path[0] === 'watch') {
+            return name;
         } else {
             return `items.${path[0]}.${name}`;
         }
@@ -685,9 +714,11 @@ class Ijs {
         if (tmp) {
             return { data: `${pref.replace(tmp[0], isRePref ? '()' : '')}${data}`, params: tmp };
         }
+        const prefPath = pref.split('.');
+        if (prefPath[0] == 'state') isRePref = false;
         return { data: isRePref ? `state.${pref}${data}` : `${pref}${data}`, params: null };
     }
-    RePref = ({ pref, data }) => {
+    RePref = ({ pref, data, state }) => {
         let answer = this.ParseData({ data, pref }, true);
         if (answer.params) {
             answer.data = answer.data.replace('()',
@@ -695,6 +726,7 @@ class Ijs {
                     return this.RePref({ data, pref });
                 }).join(',')})`
             );
+            if (state) answer.data = `state.${answer.data}`;
         }
         return answer.data;
     }
@@ -835,19 +867,23 @@ class Ijs {
     constructor () {
       this.items = {};
       this.functions = {};
+      this.watch = {};
     }
-    add = ({ model, id }) => {
+    add = ({ model, id, clean }) => {
         const tmp = {};
         tmp[id] = model;
         if (!this.items[id]) {
             this.items[id] = InitData(tmp);
         } else {
-
-            this.items[id] = InitData(ObjectAssign(ObjectAssign({},this.items[id]), tmp));
+            if (clean) this.items[id] = InitData(ObjectAssign({}, tmp));
+            else this.items[id] = InitData(ObjectAssign(ObjectAssign({},this.items[id]), tmp));
         }
     }
     addFunctions = (funcs) => {
         this.functions = ObjectAssign(this.functions, funcs);
+    }
+    addWatch = (funcs) => {
+        this.watch = ObjectAssign(this.watch, funcs);
     }
   }
   function ObjectAssign(originObj, newObj) {
@@ -880,6 +916,7 @@ class Ijs {
         this.self = self;
         this.active = true;
         this.timerId = null;
+        this.sendTimerId = null;
         this.dataPathReg = /{{([\s\S]*?)}}/gm;
         this.url = api.url;
         this.method = api.method;
@@ -889,33 +926,63 @@ class Ijs {
         this.localStorage = api.localStorage;
         this.load = false;
         this.parent_id = api.parent_id;
+        this.credentials = api.credentials;
+        this.pref = api.path;
         let paramValue;
         this.jsonData = api.data; 
         while ((paramValue = this.dataPathReg.exec(api.data)) != null) {
-            this.jsonData = this.jsonData.replace(paramValue[0], paramValue[1]);
+            let data = this.self.RePref({ data: paramValue[1], pref: this.pref, state: 1 });
+            this.jsonData = this.jsonData.replace(paramValue[0], data);
             paramValue[1] = paramValue[1].replace('state.','');
             if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
             if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
                 this.self.apis.keys[paramValue[1]].push(this.id);
             }
         }
-        setTimeout(() => {
-            let json;
-            eval(`json = ${this.jsonData};`);
-            this.data = json;
-            if (this.localStorage) {
-                const model = JSON.parse(localStorage.getItem(this.id) ? localStorage.getItem(this.id) : 'null');
-                if (model) {
-                    setTimeout(() => {
-                        this.dataInit({
-                            model,
-                            id: this.id
-                        });
-                    },0);
+        if (this.action === 'READ') {
+            setTimeout(() => {
+                let json;
+                eval(`json = ${this.jsonData};`);
+                this.data = json;
+                if (this.localStorage) {
+                    const model = JSON.parse(localStorage.getItem(this.id) ? localStorage.getItem(this.id) : 'null');
+                    if (model) {
+                        setTimeout(() => {
+                            this.dataInit({
+                                model,
+                                id: this.id
+                            });
+                        },0);
+                    }
+                }
+                if (this.action === 'READ') this.init();
+            },0);
+        }
+    }
+    reConf = (api) => {
+        if (this.action == 'SEND') {
+            this.url = api.url;
+            this.method = api.method;
+            this.action = api.action;
+            this.model = api.model;
+            this.id = api.id;
+            this.localStorage = api.localStorage;
+            this.parent_id = api.parent_id;
+            this.credentials = api.credentials;
+            this.pref = api.path;
+            let paramValue;
+            this.jsonData = api.data; 
+            while ((paramValue = this.dataPathReg.exec(api.data)) != null) {
+                let data = this.self.RePref({ data: paramValue[1], pref: this.pref, state: 1 });
+                this.jsonData = this.jsonData.replace(paramValue[0], data);
+                paramValue[1] = paramValue[1].replace('state.','');
+                if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
+                if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
+                    this.self.apis.keys[paramValue[1]].push(this.id);
                 }
             }
-            if (this.action === 'READ') this.init();
-        },0);
+        }
+        this.reData(api);
     }
     reData = (conf) => {
         clearTimeout(this.timerId);
@@ -928,13 +995,32 @@ class Ijs {
             if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
                 _this.data = json;
                 modify = true;
-            }
+            } 
+            /* else if (conf && conf.data) {
+                let paramValue, jsonData;
+                jsonData = conf.data; 
+                while ((paramValue = this.dataPathReg.exec(conf.data)) != null) {
+                    jsonData = jsonData.replace(paramValue[0], paramValue[1]);
+                    paramValue[1] = paramValue[1].replace('state.','');
+                    if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
+                    if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
+                        this.self.apis.keys[paramValue[1]].push(this.id);
+                    }
+                }
+                eval(`json = ${jsonData};`);
+                if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
+                    _this.data = json;
+                    this.jsonData = jsonData;
+                    modify = true;
+                }
+            } */
             if (conf && _this.url != conf.url) {
                 _this.url = conf.url
                 modify = true;
             }
             if (modify && _this.action !== 'SEND') {
-                _this.send();
+                window.ijs.SetData(`$.loading.${this.id}`, false);
+                _this.init(conf);
             }
         },10);
     }
@@ -944,7 +1030,18 @@ class Ijs {
     }
     send = (conf) => {
         window.ijs.SetData(`$.loading.${this.id}`, false);
-        this.init(conf);
+        clearTimeout(this.sendTimerId);
+        const _this = this;
+        this.sendTimerId = setTimeout(() => {
+            if (!_this.active) return;
+            let json;
+            eval(`json = ${_this.jsonData};`);
+            _this.data = json;
+            if (conf && conf.url && _this.url != conf.url) {
+                _this.url = conf.url
+            }
+            _this.init(conf);
+        },10);
         return this;
     }
     init = (conf) => {
@@ -978,7 +1075,8 @@ class Ijs {
     dataInit({model, id}) {
         window.ijs.models.add({
             model,
-            id
+            id,
+            clean: true
         });
         window.state[id] = window.ijs.models.items[id][id];
         window.ijs.ModelInit(id);
@@ -1032,6 +1130,7 @@ function aapi(api, callback = null, callbackError = null) {
     this.url = api.url;
     this.data = api.data;
     this.method = api.method ? api.method : 'GET';
+    this.credentials = api.credentials ? api.credentials : false;
     let xhr = new XMLHttpRequest();
     if (this.method !== 'GET') {
         xhr.open(this.method, this.url);
@@ -1043,7 +1142,7 @@ function aapi(api, callback = null, callbackError = null) {
             p = p ? `${p}&` : p;
             p = `${p}${i}=${encodeURI(this.data[i])}`;
         }
-        xhr.open(this.method, `${this.url}?${p}`);
+        xhr.open(this.method, `${p ? `${this.url}?${p}` : this.url}`);
     }
     if (!api.dataType || api.dataType != 'html')
         xhr.responseType = api.dataType ? api.dataType : 'json';
@@ -1087,6 +1186,32 @@ function aapi(api, callback = null, callbackError = null) {
         // console.log(`Загружено ${event.loaded} из ${event.total}`);
     };
 }
+
+function CleanDataInit(model) {
+    if (typeof model == 'object') {
+        if (Array.isArray(model)) {
+            let newModel = [];
+            for (const i in model) {
+                if (i !== '__data') {
+                    newModel[i] = CleanDataInit(model[i]);
+                }
+            }
+            return newModel;
+        } else if (model !== undefined && model !== null) {
+            let newModel = {}
+            for (const i in model) {
+                if (i !== '__data') {
+                    newModel[i] = CleanDataInit(model[i]);
+                }
+            }
+            return newModel;
+        } else {
+            return model;
+        }
+    }  else {
+        return model;
+    }
+}
   
 function getArrayHandler(path) {
     return {
@@ -1120,6 +1245,9 @@ function InitData(init_data, path = '') {
     init_data = {
         __data: {}
     };
+    Object.defineProperty(init_data, "__data", {
+        enumerable: false  // don't make it appear in a for in loop
+      });
     
     const keys = Object.keys(data);
     for(k in keys) {
@@ -1131,6 +1259,7 @@ function InitData(init_data, path = '') {
                 // configurable: true,
                 get: function () { 
                     return init_data.__data[field_name];
+                    return CleanDataInit(init_data.__data[field_name]);
                 },
                 set: function (new_value) {
                     if (Array.isArray(init_data.__data[field_name])) {
@@ -1190,7 +1319,9 @@ function IjsInputDom(conf, self) {
     } else if (type == 'checkbox') {
         this.attr = 'checked';
         this.node.addEventListener('change', this.Checked);
-        this.node.checked = JSON.parse(this.self.GetData({ name: this.data, pref: this.path }));
+        this.node.checked = IsJsonString(this.self.GetData({ name: this.data, pref: this.path }))
+            ? JSON.parse(this.self.GetData({ name: this.data, pref: this.path }))
+            : this.self.GetData({ name: this.data, pref: this.path }) ? true : false;
     }else if (type == 'radio') {
         this.attr = 'radio';
         this.node.addEventListener('change', this.Radio);
@@ -1295,6 +1426,7 @@ IjsForDom.prototype.ReInit = function() {
         return;
     }
     this.node.innerHTML = '';
+    this.self.CleanKeys(this.id);
     items.forEach((item, key) => {
         this.nodes.forEach(node => {
             this.helpNode.append(node.cloneNode(true));
@@ -1348,6 +1480,7 @@ IjsPageDom.prototype.rePage = function(page) {
     });
     if (this.waiter === 0) this.reInit(page);
 }
+// IjsPageDom.prototype.ReInit = function() { return false; }
 IjsPageDom.prototype.reInit = function(page) {
     for( let i = 0; i < page.children.length; i++) {
         if (page.children[i].tagName != 'SCRIPT') {
@@ -1401,6 +1534,7 @@ IjsIfDom.prototype.ReInit = function() {
     });
     if ((!object || !object.init) && old_object) {
         old_object.node.innerHTML = '';
+        old_object.node.style.display = 'none';
         old_object.init = false;
         this.self.CleanKeys(this.id);
     }
@@ -1422,6 +1556,7 @@ IjsIfDom.prototype.ReInit = function() {
             object.node.prepend(this.helpNode.children[i]);
         }
         object.init = true;
+        object.node.style.display = 'block';
         return true;
     }
     return false;
@@ -1503,4 +1638,12 @@ function GetParamsFromString(str) {
         splits.push(str.substr(lastSplit, str.length).trim());
     }
     return splits;
+}
+function IsJsonString(str) {
+    try {
+        JSON.parse(str);
+    } catch (e) {
+        return false;
+    }
+    return true;
 }
