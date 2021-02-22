@@ -28,6 +28,7 @@ class Ijs {
         };
         this.events = [];
         this.classes = [];
+        this.events = [];
         this.data = [];
         this.keys = {};
         this.paths = {};
@@ -48,9 +49,20 @@ class Ijs {
         this.LocalDataInit({
             loading: {},
         });
+        this.models.add({
+            model: true,
+            id: '$page'
+        });
+        this.models.add({
+            model: {},
+            id: '$event'
+        });
         // this.models.addFunctions({set: this.SetData});
         // window.state.$f = this.models.functions;
         this.Run();
+        for( let i = 0; i < document.querySelectorAll('loading').length; i++) {
+            document.querySelectorAll('loading')[i].remove();
+        }
     }
     //INIT CONF
     ConfInit = (conf) => {
@@ -128,11 +140,12 @@ class Ijs {
     }
     AddCatchHref = () => {
         document.addEventListener('click', event => {
-
+            if (event.metaKey || event.ctrlKey) return;
             const a = event.target.closest('a');
             if (a && (!a.getAttribute('target') || a.getAttribute('target') != '_blank') && a.getAttribute('href') && this.GetPageNode()) {
                 const url = a.getAttribute('href');
                 if (url != location.pathname) {
+                    window.ijs.SetData('$page', false);
                     aapi({ url, dataType: 'html' }, (answer) => {
                         let parser = new DOMParser();
                         let doc = parser.parseFromString(answer, "text/html").querySelector('page');
@@ -140,6 +153,7 @@ class Ijs {
                             this.GetPageNode().rePage(doc);
                             window.history.pushState({},"", url);
                         }
+                        window.ijs.SetData('$page', true);
                     });
                 }
                 event.preventDefault();
@@ -244,73 +258,16 @@ class Ijs {
             item.ReClass();
         });
     }
-    AddEvent = (conf) => {
-        if (conf.attr.nodeName === 'click') {
-            conf.node.addEventListener('click', () => { this.DefClick(conf); });
-        } else if (conf.attr.nodeName === 'thisclick') {
-            conf.node.addEventListener('click', (e) => { this.ThisClick(conf, e); });
-        } else if (conf.attr.nodeName === 'keyup') {
-            conf.node.addEventListener('keyup', (e) => { this.KeyEvent(conf, e); });
-        } else if (conf.attr.nodeName === 'change') {
-            conf.node.addEventListener('change', (e) => { this.KeyEvent(conf, e); });
-        }
-    }
-    KeyEvent = (conf, e) => {
-        this.ClickEvent(conf);
-    }
-    DefClick = (conf) => {
-        this.ClickEvent(conf);
-    }
-    ThisClick = ({attr, path, node}, e) => {
-        if (e.target != node) return;
-        this.ClickEvent({attr, path});
-    }
-    ClickEvent = ({attr, path}) => {
-        let paramFunc;
-        let data = attr.nodeValue;
-        let is_set;
-        const funcs = data.split(';');
-        funcs.forEach(func => {
-            is_set = false;
-            while (( paramFunc = this.funcReg.exec(func)) != null) {
-                if (paramFunc[1] === 'set') {
-                    is_set = true;
-                    let { params } = this.ParseData({
-                        data: func,
-                        pref: path
-                    });
-                    if (!params) return;
-                    params = GetParamsFromString(params[1]);
-                    if (params.length < 2) return;
-
-                    const answer = this.ParseData({
-                        data: params[0],
-                        pref: path
-                    });
-                    params[0] = answer.data;
-                    if (params[1][0] == '\\') {
-                        params[1] = params[1].slice(1);
-                        params[1] = IsJsonString(params[1]) ? JSON.parse(params[1]) : params[1];
-                    } else {
-                        params[1] = this.GetData({ name: params[1], pref: path });
-                    }
-                    this.SetData(...params);
-                }
-            }
-            if (!is_set) {
-                this.GetData({ name: func, pref: path });
-            }
-        });
-    }
     
     AnalyzeAttribute = (conf) => {
         if (
             conf.attr.nodeName === 'click'
             || conf.attr.nodeName === 'thisclick'
+            || conf.attr.nodeName === 'hover'
             || conf.attr.nodeName === 'keyup'
             || conf.attr.nodeName === 'change'
         ) {
-            this.AddEvent(conf);
+            this.events.push(new IjsEventDom(conf, this));
             return;
         } else if (conf.attr.nodeName === ':class') {
             this.AddClass(conf);
@@ -430,6 +387,10 @@ class Ijs {
                         this.AddNode(obj);
                     }
                 }
+            } else if (conf.node.attributes[i].nodeName == 'setfocus') {
+                setTimeout(() => {
+                    conf.node.focus();
+                },10);
             } else if (conf.node.attributes[i].nodeName !== 'value') {
                 this.AnalyzeAttribute({
                     ...conf,
@@ -609,6 +570,7 @@ class Ijs {
                         node: item.node,
                         text: item.input,
                         attr: item.attr,
+                        focus: item.focus
                     };
                 }
                 results[item.id].text = results[item.id].text
@@ -623,7 +585,7 @@ class Ijs {
             } else {
                 if (results[i].attr == 'value' && results[i].node.tagName == 'SELECT') {
                     results[i].node.value = results[i].text;
-                } else if (results[i].attr == 'value' && (results[i].node.tagName == 'INPUT' || results[i].node.tagName == 'TEXTAREA')) {
+                } else if (!results[i].focus && results[i].attr == 'value' && (results[i].node.tagName == 'INPUT' || results[i].node.tagName == 'TEXTAREA')) {
                     results[i].node.value = results[i].text;
                 } else if (results[i].attr == 'checked' && results[i].node.tagName == 'INPUT') {
                     results[i].node.checked = JSON.parse(results[i].text);
@@ -736,7 +698,7 @@ class Ijs {
         let { data, params } = this.ParseData({ data: name, pref });
         let path = this.ModifyPathName(data).trim().split('.');
         let model = this.models;
-        let cache = '';
+        let cache = pref;
         for (var i in path) {
             cache = cache ? `${cache}.${path[i]}` : path[i];
             if (path[i] == '*')
@@ -748,6 +710,8 @@ class Ijs {
             else if (model[path[i]] || model[path[i]] == 0) {
                 model = model[path[i]];
                 if (typeof model == 'function') {
+                    cache = `${cache}(${params ? params[1] : ''})`;
+                    // cache = this.RePref({data: cache, pref});
                     if (!this.tmp[cache]) {
                         model = this.GetFuncData({ model, pref, params: params ? params[1] : '' });
                         this.tmp[cache] = model;
@@ -816,9 +780,20 @@ class Ijs {
     }
 
     CleanKeys = (id) => {
+        //event 
+        this.events.filter(event => event.parent_id == id).forEach(event => {
+            event.RemoveEvent();
+        });
+        this.events = this.events.filter(item => item.parent_id !== id);
         //apis
-        this.apis.objects.filter(api => api.parent_id == id).forEach(api => api.active = false);
+        this.apis.objects.filter(api => api.parent_id == id).forEach(api => {
+            api.active = false;
+            this.SetData(`$.loading.${api.id}`, false);
+        });
         //classses
+        this.classes.filter(item => item.parent_id == id).forEach(item => {
+            clearTimeout(item.timerId);
+        });
         this.classes = this.classes.filter(item => item.parent_id !== id);
         //data
         let ids = this.data.filter(item => item.parent_id === id).map(item => item.id);
@@ -985,44 +960,47 @@ class Ijs {
         this.reData(api);
     }
     reData = (conf) => {
-        clearTimeout(this.timerId);
-        const _this = this;
-        this.timerId = setTimeout(() => {
-            if (!_this.active) return;
-            let modify = false;
-            let json;
-            eval(`json = ${_this.jsonData};`);
-            if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
-                _this.data = json;
-                modify = true;
-            } 
-            /* else if (conf && conf.data) {
-                let paramValue, jsonData;
-                jsonData = conf.data; 
-                while ((paramValue = this.dataPathReg.exec(conf.data)) != null) {
-                    jsonData = jsonData.replace(paramValue[0], paramValue[1]);
-                    paramValue[1] = paramValue[1].replace('state.','');
-                    if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
-                    if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
-                        this.self.apis.keys[paramValue[1]].push(this.id);
-                    }
-                }
-                eval(`json = ${jsonData};`);
+        if (this.action !== 'SEND') {
+            clearTimeout(this.timerId);
+            const _this = this;
+            this.timerId = setTimeout(() => {
+                if (!_this.active) return;
+                let modify = false;
+                let json;
+                eval(`json = ${_this.jsonData};`);
                 if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
                     _this.data = json;
-                    this.jsonData = jsonData;
+                    modify = true;
+                } else if (conf && conf.data) {
+                    let paramValue, jsonData;
+                    jsonData = conf.data; 
+                    while ((paramValue = this.dataPathReg.exec(conf.data)) != null) {
+                        jsonData = jsonData.replace(paramValue[0], paramValue[1]);
+                        paramValue[1] = paramValue[1].replace('state.','');
+                        if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
+                        if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
+                            this.self.apis.keys[paramValue[1]].push(this.id);
+                        }
+                    }
+                    eval(`json = ${jsonData};`);
+                    if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
+                        _this.data = json;
+                        this.jsonData = jsonData;
+                        modify = true;
+                    }
+                }
+                if (conf && _this.url != conf.url) {
+                    _this.url = conf.url
                     modify = true;
                 }
-            } */
-            if (conf && _this.url != conf.url) {
-                _this.url = conf.url
-                modify = true;
-            }
-            if (modify && _this.action !== 'SEND') {
-                window.ijs.SetData(`$.loading.${this.id}`, false);
-                _this.init(conf);
-            }
-        },10);
+                if (modify && _this.action !== 'SEND') {
+                    window.ijs.SetData(`$.loading.${this.id}`, false);
+                    _this.init(conf);
+                } else {
+                    window.ijs.SetData(`$.loading.${this.id}`, true);
+                }
+            },10);
+        }
     }
     changeData = (data) => {
         this.data = ObjectAssign(this.data, data);
@@ -1299,6 +1277,7 @@ function IjsInputDom(conf, self) {
     this.id = conf.id;
     this.timerId = null;
     this.self = self;
+    this.focus = false;
     
     this.Change = this.Change.bind(this);
     this.Radio = this.Radio.bind(this);
@@ -1315,6 +1294,12 @@ function IjsInputDom(conf, self) {
     } else if (this.node.tagName === 'TEXTAREA') {
         this.attr = 'value';
         this.node.addEventListener('keyup', this.Change);
+        this.node.addEventListener('focus', () => {
+            this.focus = true;
+        });
+        this.node.addEventListener('focusout', () => {
+            this.focus = false;
+        });
         this.node.value = this.self.GetData({ name: this.data, pref: this.path });
     } else if (type == 'checkbox') {
         this.attr = 'checked';
@@ -1331,6 +1316,12 @@ function IjsInputDom(conf, self) {
     } else {
         this.attr = 'value';
         this.node.addEventListener('keyup', this.Change);
+        this.node.addEventListener('focus', () => {
+            this.focus = true;
+        });
+        this.node.addEventListener('focusout', () => {
+            this.focus = false;
+        });
         this.node.value = this.self.GetData({ name: this.data, pref: this.path });
     }
 }
@@ -1365,18 +1356,20 @@ function IjsClassDom(conf) {
     this.data = conf.data;
     this.parent_id = conf.parent_id;
     this.node = conf.node;
+    this.timerId = null;
     this.ReClass();
 }
 IjsClassDom.prototype.ReClass = function() {
     const item = this;
-    setTimeout(() => {
+    clearTimeout(this.timerId);
+    this.timerId = setTimeout(() => {
         let json;
         eval(`json = ${item.data};`);
         for (const className in json) {
             if (!json[className]) item.node.classList.remove(className);
             else item.node.classList.add(className);
         }
-    },1);
+    },10);
 }
 
 function IjsForDom(conf, self) {
@@ -1442,6 +1435,135 @@ IjsForDom.prototype.ReInit = function() {
         });
         while (this.helpNode.children.length > 0) {
             this.node.append(this.helpNode.children[0]);
+        }
+    });
+}
+
+function IjsEventDom(conf, self) {
+    this.model = conf.model;
+    this.node = conf.node;
+    this.attr = conf.attr;
+    this.nodeName = conf.attr.nodeName
+    this.path = conf.path;
+    this.pref = conf.pref ? conf.pref : null;
+    this.index = conf.index ? conf.index : null;
+    this.three_id = conf.three_id ? conf.three_id : null;
+    this.parent_id = conf.parent_id ? conf.parent_id : null;
+    this.self = self;
+    this.funcReg = /^([\s\S]*?)\(/gm;
+    this.AddEvent();
+}
+IjsEventDom.prototype.RemoveEvent = function () {
+    if (this.nodeName === 'click') {
+        this.node.removeEventListener('click', () => { this.DefClick(); });
+    } else if (this.nodeName === 'hover') {
+        this.node.removeEventListener('mouseenter', () => { this.DefClick(); });
+    } else if (this.nodeName === 'thisclick') {
+        this.node.removeEventListener('click', (e) => { this.ThisClick(e); });
+    } else if (this.nodeName === 'keyup') {
+        this.node.removeEventListener('keyup', (e) => { this.KeyEvent(e); });
+    } else if (this.nodeName === 'change') {
+        this.node.removeEventListener('change', (e) => { this.KeyEvent(e); });
+    }
+}
+IjsEventDom.prototype.AddEvent = function() {
+    if (this.nodeName === 'click') {
+        this.node.addEventListener('click', () => { this.DefClick(); });
+    } else if (this.nodeName === 'hover') {
+        this.node.addEventListener('mouseenter', () => { this.DefClick(); });
+    } else if (this.nodeName === 'thisclick') {
+        this.node.addEventListener('click', (e) => { this.ThisClick(e); });
+    } else if (this.nodeName === 'keyup') {
+        this.node.addEventListener('keyup', (e) => { this.KeyEvent(e); });
+    } else if (this.nodeName === 'change') {
+        this.node.addEventListener('change', (e) => { this.KeyEvent(e); });
+    }
+}
+IjsEventDom.prototype.KeyEvent = function(e) {
+    this.self.models.add({
+        model: {
+            altKey: e.altKey,
+            bubbles: e.bubbles,
+            cancelBubble: e.cancelBubble,
+            cancelable: e.cancelable,
+            charCode: e.charCode,
+            code: e.code,
+            composed: e.composed,
+            ctrlKey: e.ctrlKey,
+            // currentTarget: e.currentTarget,
+            defaultPrevented: e.defaultPrevented,
+            detail: e.detail,
+            eventPhase: e.eventPhase,
+            isComposing: e.isComposing,
+            isTrusted: e.isTrusted,
+            key: e.key,
+            keyCode: e.keyCode,
+            location: e.location,
+            metaKey: e.metaKey,
+            repeat: e.repeat,
+            returnValue: e.returnValue,
+            shiftKey: e.shiftKey,
+            timeStamp: e.timeStamp,
+            type: e.type,
+            which: e.which
+        },
+        id: '$event',
+        clean: true
+    });
+    this.ClickEvent();
+}
+IjsEventDom.prototype.DefClick = function(e) {
+    // this.models.items.$event.$event = e;
+    this.ClickEvent();
+}
+IjsEventDom.prototype.ThisClick = function(e) {
+    if (e.target != this.node) return;
+    // this.models.items.$event.$event = e;
+    this.ClickEvent();
+}
+IjsEventDom.prototype.ClickEvent = function() {
+    let paramFunc;
+    let data = this.attr.nodeValue;
+    let is_set;
+    const funcs = data.split(';');
+    funcs.forEach(func => {
+        is_set = false;
+        while (( paramFunc = this.funcReg.exec(func)) != null) {
+            if (paramFunc[1] === 'set') {
+                is_set = true;
+                let { params } = this.self.ParseData({
+                    data: func,
+                    pref: this.path
+                });
+                if (!params) return;
+                params = GetParamsFromString(params[1]);
+                if (params.length < 2) return;
+
+                const answer = this.self.ParseData({
+                    data: params[0],
+                    pref: this.path
+                });
+                params[0] = answer.data;
+                if (params[1][0] == '\\') {
+                    params[1] = params[1].slice(1);
+                    params[1] = IsJsonString(params[1]) ? JSON.parse(params[1]) : params[1];
+                } else {
+                    params[1] = this.self.GetData({ name: params[1], pref: this.path });
+                }
+                this.self.SetData(...params);
+            } else if (paramFunc[1] === 'api') {
+                is_set = true;
+                let { params } = this.self.ParseData({
+                    data: func,
+                    pref: this.path
+                });
+                if (!params) return;
+                this.api(params[1]).send();
+            }
+        }
+        if (!is_set) {
+            func = func.replace('$event', 'state.$event');
+            this.self.GetData({ name: func, pref: this.path });
         }
     });
 }
