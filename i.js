@@ -41,6 +41,7 @@ class Ijs {
         };
         this.models = new Ijs_Object();
         this.updateTimer = null;
+        this.modelTimer = null;
         this.updateIds = {};
         this.updateConditionIds = {};
         this.updateIfIds = {};
@@ -70,7 +71,7 @@ class Ijs {
         if (conf.watch) this.models.addWatch(conf.watch);
         window.state.$f = this.models.functions;
         if (conf.data) this.LocalDataInit(conf.data);
-        // this.ModelInit('*');
+        this.ModelInit('*');
     }
     //INIT APLICATION
     Run = () => {
@@ -122,10 +123,20 @@ class Ijs {
           localStorage: api.hasAttribute('localStorage') ? true : false,
           parent_id: pconf.parent_id,
           path: pconf.path,
+          node: api,
         };
+        this.AnalyzeAttribute({
+            ...pconf,
+            attr: {
+                nodeName: 'url',
+                nodeValue: api.getAttribute('url')
+            },
+            i: 0
+        });
 
         if (this.api(conf.id)) {
             this.api(conf.id).active = true;
+            this.api(conf.id).node = api;
             this.api(conf.id).reConf(conf);
             return;
         }
@@ -150,6 +161,7 @@ class Ijs {
                         let parser = new DOMParser();
                         let doc = parser.parseFromString(answer, "text/html").querySelector('page');
                         if (doc) {
+                            window.scrollTo(0,0);
                             this.GetPageNode().rePage(doc);
                             window.history.pushState({},"", url);
                         }
@@ -274,17 +286,19 @@ class Ijs {
             return;
         }
         let nodeValue;
-        let paramValue, paramValueTmp;
+        // let paramValue, paramValueTmp;
         let need_clean = false;
         let new_data = conf.attr.nodeValue;
         
         while ((nodeValue = this.textContentReg.exec(conf.attr.nodeValue)) != null) {
             const model = conf.model ? conf.model : nodeValue[1].trim().split('.')[0];
+            const models = this.GetModels({pref: conf.path, data: nodeValue[1]});
             let data = nodeValue[1].trim();
             const obj = {
                 node: conf.node,
                 path: conf.path,
                 model,
+                models,
                 data,
                 mask: nodeValue[0],
                 input: nodeValue.input,
@@ -360,6 +374,16 @@ class Ijs {
         }
     }
     InputNode = (conf) => {
+        if (conf.node.getAttribute('value') && conf.node.getAttribute('type').toLowerCase() == 'radio') {
+            this.AnalyzeAttribute({
+                ...conf,
+                attr: {
+                    nodeName: 'value',
+                    nodeValue: conf.node.getAttribute('value')
+                },
+                i: 28
+            });
+        }
         for (let i = 0; i < conf.node.attributes.length; i++) {
             if (conf.node.attributes[i].nodeName === 'name') {
                 let nodeValue, nodeValueTmp;
@@ -513,9 +537,12 @@ class Ijs {
         this.ReClass();
 
         const uniquePath = Object.keys(this.paths);
-        this.WatchInit(uniquePath);
+        setTimeout(() => {
+            this.WatchInit(uniquePath);
+        },1);
     }
     ModelInit = (model) => {
+        this.tmp = {};
         let reInit = true;
         while (reInit) {
             const uniqueConditionIds = this.GetUniqueIds(model, this.helps.data, 'id');
@@ -530,7 +557,7 @@ class Ijs {
         this.ReClass();
     }
     GetUniqueIds = (model, data, id) => {
-        const allItems = data.filter(item => model === '*' || item.model === model);
+        const allItems = data.filter(item => model === '*' || !item.models || item.models.indexOf(model) !== -1);
         let uniqueIds = [];
 
         allItems.forEach(item => {
@@ -575,6 +602,9 @@ class Ijs {
                 }
                 results[item.id].text = results[item.id].text
                     .replace(item.mask, result);
+                if (id == '10I600-condition-1') {
+                    console.log(result);
+                }
             });
         });
         for (const i in results) {
@@ -618,6 +648,12 @@ class Ijs {
             return this.GetData({ name, pref });
         });
         return model(...params);
+    }
+    GetModels = ({ pref, data }) => {
+        return this.ParseKeys({pref, data, state: true }).map(item => {
+            return item.trim().split('.')[0] != 'state' ? item.trim().split('.')[0] :
+                item.trim().split('.').length > 1 ? item.trim().split('.')[1] : 'state';
+        });
     }
     ParseKeys = ({ pref, data, log }) => {
         const res = this.ParseData({ data, pref, state: true });
@@ -897,6 +933,7 @@ class Ijs {
         this.method = api.method;
         this.action = api.action;
         this.model = api.model;
+        this.node = api.node;
         this.id = api.id;
         this.localStorage = api.localStorage;
         this.load = false;
@@ -966,29 +1003,43 @@ class Ijs {
             this.timerId = setTimeout(() => {
                 if (!_this.active) return;
                 let modify = false;
-                let json;
-                eval(`json = ${_this.jsonData};`);
-                if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
-                    _this.data = json;
-                    modify = true;
-                } else if (conf && conf.data) {
-                    let paramValue, jsonData;
-                    jsonData = conf.data; 
+                if (conf && conf.data) {
+                    this.jsonData = conf.data;
+                    let paramValue;
                     while ((paramValue = this.dataPathReg.exec(conf.data)) != null) {
-                        jsonData = jsonData.replace(paramValue[0], paramValue[1]);
+                        let data = this.self.RePref({ data: paramValue[1], pref: this.pref, state: 1 });
+                        this.jsonData = this.jsonData.replace(paramValue[0], data);
                         paramValue[1] = paramValue[1].replace('state.','');
                         if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
                         if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
                             this.self.apis.keys[paramValue[1]].push(this.id);
                         }
                     }
-                    eval(`json = ${jsonData};`);
-                    if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
-                        _this.data = json;
-                        this.jsonData = jsonData;
-                        modify = true;
-                    }
                 }
+                let json;
+                eval(`json = ${_this.jsonData};`);
+                if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
+                    _this.data = json;
+                    modify = true;
+                }
+                // else if (conf && conf.data) {
+                //     let paramValue, jsonData;
+                //     jsonData = conf.data; 
+                //     while ((paramValue = this.dataPathReg.exec(conf.data)) != null) {
+                //         jsonData = jsonData.replace(paramValue[0], paramValue[1]);
+                //         paramValue[1] = paramValue[1].replace('state.','');
+                //         if (!this.self.apis.keys[paramValue[1]]) this.self.apis.keys[paramValue[1]] = [];
+                //         if (this.self.apis.keys[paramValue[1]].indexOf(this.id) === -1) {
+                //             this.self.apis.keys[paramValue[1]].push(this.id);
+                //         }
+                //     }
+                //     eval(`json = ${jsonData};`);
+                //     if (JSON.stringify(json) !== JSON.stringify(_this.data)) {
+                //         _this.data = json;
+                //         this.jsonData = jsonData;
+                //         modify = true;
+                //     }
+                // }
                 if (conf && _this.url != conf.url) {
                     _this.url = conf.url
                     modify = true;
@@ -1011,12 +1062,14 @@ class Ijs {
         clearTimeout(this.sendTimerId);
         const _this = this;
         this.sendTimerId = setTimeout(() => {
-            if (!_this.active) return;
+            // if (!_this.active) return;
             let json;
             eval(`json = ${_this.jsonData};`);
             _this.data = json;
             if (conf && conf.url && _this.url != conf.url) {
-                _this.url = conf.url
+                _this.url = conf.url;
+            } else if ((!conf || !conf.url) && _this.url != _this.node.getAttribute('url')) {
+                _this.url = _this.node.getAttribute('url');
             }
             _this.init(conf);
         },10);
@@ -1110,7 +1163,7 @@ function aapi(api, callback = null, callbackError = null) {
     this.method = api.method ? api.method : 'GET';
     this.credentials = api.credentials ? api.credentials : false;
     let xhr = new XMLHttpRequest();
-    if (this.method !== 'GET') {
+    if (this.method == 'POST') {
         xhr.open(this.method, this.url);
         // xhr.setRequestHeader('Content-Type', 'multipart/form-data; boundary=' + boundary);
         // xhr.setRequestHeader('Content-type', 'application/json; charset=utf-8');
@@ -1125,7 +1178,7 @@ function aapi(api, callback = null, callbackError = null) {
     if (!api.dataType || api.dataType != 'html')
         xhr.responseType = api.dataType ? api.dataType : 'json';
     if (this.credentials) xhr.withCredentials = true;
-    if (this.method == 'GET') {
+    if (this.method !== 'POST') {
         xhr.send(JSON.stringify(this.data));
     } else {
         // var boundary = String(Math.random()).slice(2);
@@ -1270,6 +1323,7 @@ function IjsInputDom(conf, self) {
     this.path = conf.path ? conf.path : '';
     this.node = conf.node;
     this.model = conf.model;
+    this.models = [this.model];
     this.mask = conf.mask ? conf.mask : null;
     this.data = conf.data ? conf.data : null;
     this.input = conf.input ? conf.input : null;
@@ -1307,7 +1361,7 @@ function IjsInputDom(conf, self) {
         this.node.checked = IsJsonString(this.self.GetData({ name: this.data, pref: this.path }))
             ? JSON.parse(this.self.GetData({ name: this.data, pref: this.path }))
             : this.self.GetData({ name: this.data, pref: this.path }) ? true : false;
-    }else if (type == 'radio') {
+    } else if (type == 'radio') {
         this.attr = 'radio';
         this.node.addEventListener('change', this.Radio);
         if (this.node.value == this.self.GetData({ name: this.data, pref: this.path })) {
@@ -1405,6 +1459,7 @@ function IjsForDom(conf, self) {
     if (!this.model) {
         this.model = this.data.trim().split('.')[0];
     }
+    this.models = this.self.GetModels({pref: this.path, data: this.data});
     this.newPath = this.self.RePref({ data: this.data, pref: this.path });
 
     this.ReInit();
@@ -1596,14 +1651,15 @@ IjsPageDom.prototype.rePage = function(page) {
                 .then((answer) => {
                     eval(answer);
                     this.waiter--;
-                    if (this.waiter === 0) this.reInit(page);
+                    if (this.waiter === 0) this.ReInit(page);
                 });
         }
     });
-    if (this.waiter === 0) this.reInit(page);
+    if (this.waiter === 0) this.ReInit(page);
 }
 // IjsPageDom.prototype.ReInit = function() { return false; }
-IjsPageDom.prototype.reInit = function(page) {
+IjsPageDom.prototype.ReInit = function(page) {
+    if (!page) return false;
     for( let i = 0; i < page.children.length; i++) {
         if (page.children[i].tagName != 'SCRIPT') {
             this.helpNode.append(page.children[i]);
@@ -1625,6 +1681,7 @@ IjsPageDom.prototype.reInit = function(page) {
 
 function IjsIfDom(conf, self) {
     this.model = conf.model;
+    // this.models = self.GetModels({pref: conf.path, data: nodeValue[1]});
     this.path = conf.path;
     this.id = conf.id ? conf.id : null;
     this.pref = conf.pref ? conf.pref : null;
@@ -1661,6 +1718,7 @@ IjsIfDom.prototype.ReInit = function() {
         this.self.CleanKeys(this.id);
     }
     if (!object) return false;
+    object.node.style.display = 'block';
     if (!object.init) {
         object.nodes.forEach(node => {
             this.helpNode.append(node.cloneNode(true));
@@ -1678,7 +1736,6 @@ IjsIfDom.prototype.ReInit = function() {
             object.node.prepend(this.helpNode.children[i]);
         }
         object.init = true;
-        object.node.style.display = 'block';
         return true;
     }
     return false;
@@ -1704,10 +1761,12 @@ IjsIfDom.prototype.InitNode = function(node, key) {
     let new_data = attr.nodeValue;
     while ((nodeValue = this.textContentReg.exec(attr.nodeValue)) != null) {
         const model = this.model ? this.model : nodeValue[1].trim().split('.')[0];
+        const models = this.self.GetModels({pref: this.path, data: nodeValue[1]});
         let data = nodeValue[1].trim();
         const obj = {
             node,
             model,
+            models,
             path: this.path,
             mask: nodeValue[0],
             input: nodeValue.input,
