@@ -153,23 +153,31 @@ class Ijs {
         document.addEventListener('click', event => {
             if (event.metaKey || event.ctrlKey) return;
             const a = event.target.closest('a');
-            if (a && (!a.getAttribute('target') || a.getAttribute('target') != '_blank') && a.getAttribute('href') && this.GetPageNode()) {
+            if (
+                a
+                && (!a.getAttribute('target') || a.getAttribute('target') != '_blank')
+                && a.getAttribute('href')
+                && !a.hasAttribute('reopen')
+                && this.GetPageNode()) {
                 const url = a.getAttribute('href');
                 if (url != location.pathname) {
-                    window.ijs.SetData('$page', false);
-                    aapi({ url, dataType: 'html' }, (answer) => {
-                        let parser = new DOMParser();
-                        let doc = parser.parseFromString(answer, "text/html").querySelector('page');
-                        if (doc) {
-                            window.scrollTo(0,0);
-                            this.GetPageNode().rePage(doc);
-                            window.history.pushState({},"", url);
-                        }
-                        window.ijs.SetData('$page', true);
-                    });
+                    this.page(url);
                 }
                 event.preventDefault();
             }
+        });
+    }
+    page = (url) => {
+        window.ijs.SetData('$page', false);
+        aapi({ url, dataType: 'html' }, (answer) => {
+            let parser = new DOMParser();
+            let doc = parser.parseFromString(answer, "text/html").querySelector('page');
+            if (doc) {
+                window.scrollTo(0,0);
+                this.GetPageNode().rePage(doc);
+                window.history.pushState({},"", url);
+            }
+            window.ijs.SetData('$page', true);
         });
     }
     //ANALYZE DOCUMENT to find data path
@@ -374,7 +382,7 @@ class Ijs {
         }
     }
     InputNode = (conf) => {
-        if (conf.node.getAttribute('value') && conf.node.getAttribute('type').toLowerCase() == 'radio') {
+        if (conf.node.getAttribute('value') && conf.node.getAttribute('type') && conf.node.getAttribute('type').toLowerCase() == 'radio') {
             this.AnalyzeAttribute({
                 ...conf,
                 attr: {
@@ -602,9 +610,6 @@ class Ijs {
                 }
                 results[item.id].text = results[item.id].text
                     .replace(item.mask, result);
-                if (id == '10I600-condition-1') {
-                    console.log(result);
-                }
             });
         });
         for (const i in results) {
@@ -758,8 +763,8 @@ class Ijs {
                         model = this.tmp[cache];
                     }
                 }
-            } else 
-                return model[path[i]];
+            } else
+                return model[path[i]] === undefined && !not_null ? '' : model[path[i]];
         }
         if (!not_null) return this.CleanData(model);
         if (!model) return null;
@@ -810,7 +815,7 @@ class Ijs {
             } else {
                 model[path[i]] = {};
                 model = model[path[i]];
-                console.log(`false ${path[i]}`);
+                // console.log(`false ${path[i]}`);
             }
         }
     }
