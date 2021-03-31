@@ -125,14 +125,16 @@ class Ijs {
           path: pconf.path,
           node: api,
         };
-        this.AnalyzeAttribute({
+        const url = this.AnalyzeAttribute({
             ...pconf,
+            id: conf.id,
             attr: {
                 nodeName: 'url',
                 nodeValue: api.getAttribute('url')
             },
             i: 0
-        });
+        }, true);
+        if (url) conf.url = url;
 
         if (this.api(conf.id)) {
             this.api(conf.id).active = true;
@@ -161,13 +163,13 @@ class Ijs {
                 && this.GetPageNode()) {
                 const url = a.getAttribute('href');
                 if (url != location.pathname) {
-                    this.page(url);
+                    this.page(url, event);
                 }
                 event.preventDefault();
             }
         });
     }
-    page = (url) => {
+    page = (url, event = false) => {
         window.ijs.SetData('$page', false);
         aapi({ url, dataType: 'html' }, (answer) => {
             let parser = new DOMParser();
@@ -176,6 +178,8 @@ class Ijs {
                 window.scrollTo(0,0);
                 this.GetPageNode().rePage(doc);
                 window.history.pushState({},"", url);
+            } else {
+                location = url;
             }
             window.ijs.SetData('$page', true);
         });
@@ -279,13 +283,15 @@ class Ijs {
         });
     }
     
-    AnalyzeAttribute = (conf) => {
+    AnalyzeAttribute = (conf, isApi = false) => {
         if (
             conf.attr.nodeName === 'click'
             || conf.attr.nodeName === 'thisclick'
             || conf.attr.nodeName === 'hover'
             || conf.attr.nodeName === 'keyup'
             || conf.attr.nodeName === 'change'
+            || conf.attr.nodeName === 'focus'
+            || conf.attr.nodeName === 'blur'
         ) {
             this.events.push(new IjsEventDom(conf, this));
             return;
@@ -311,13 +317,13 @@ class Ijs {
                 mask: nodeValue[0],
                 input: nodeValue.input,
                 attr: conf.attr.nodeName,
-                id: idInit({
+                id: isApi && conf.id ? conf.id : idInit({
                     ...conf,
                     nodeName: conf.attr.nodeName,
                 }),
                 parent_id: conf.parent_id
             };
-            this.AddNode(obj);
+            this.AddNode(obj, isApi);
             need_clean = true;
             new_data = new_data.replace(obj.mask, this.GetData({ name: obj.data, pref: obj.path }));
         }
@@ -326,6 +332,7 @@ class Ijs {
             conf.node.textContent = '';
             conf.node.innerHTML = new_data;
         }
+        return new_data || null;
     }
     ForNode = (conf) => {
         for (let i = 0; i < conf.node.attributes.length; i++) {
@@ -472,7 +479,7 @@ class Ijs {
             }
         }
     }
-    AddNode = (obj) => {
+    AddNode = (obj, isApi = false) => {
         this.data.push(obj);
         const datas = this.ParseKeys({ data: obj.data, pref: obj.path, log: obj.obj == 'input' });
         datas.forEach(data => {
@@ -481,6 +488,10 @@ class Ijs {
             data = data.join('.');
             if (!this.keys[data]) this.keys[data] = [];
             if (this.keys[data].indexOf(obj.id) === -1) this.keys[data].push(obj.id);
+            if (isApi) {
+                if (!this.apis.keys[data]) this.apis.keys[data] = [];
+                if (this.apis.keys[data].indexOf(obj.id) === -1) this.apis.keys[data].push(obj.id);
+            }
         });
     }
     AddIfCondition = (obj) => {
@@ -766,6 +777,7 @@ class Ijs {
             } else
                 return model[path[i]] === undefined && !not_null ? '' : model[path[i]];
         }
+        if (name == 'state.$event') return model;
         if (!not_null) return this.CleanData(model);
         if (!model) return null;
         else if (typeof model === 'object') {
@@ -945,6 +957,8 @@ class Ijs {
         this.parent_id = api.parent_id;
         this.credentials = api.credentials;
         this.pref = api.path;
+        this.success_callback = null;
+        this.error_callback = null;
         let paramValue;
         this.jsonData = api.data; 
         while ((paramValue = this.dataPathReg.exec(api.data)) != null) {
@@ -1045,8 +1059,11 @@ class Ijs {
                 //         modify = true;
                 //     }
                 // }
-                if (conf && _this.url != conf.url) {
-                    _this.url = conf.url
+                if (conf && conf.url && _this.url != conf.url) {
+                    _this.url = conf.url;
+                    modify = true;
+                } else if ((!conf || !conf.url) && _this.url != _this.node.getAttribute('url')) {
+                    _this.url = _this.node.getAttribute('url');
                     modify = true;
                 }
                 if (modify && _this.action !== 'SEND') {
@@ -1081,13 +1098,18 @@ class Ijs {
         return this;
     }
     init = (conf) => {
+        if (conf && conf.success) this.success_callback = conf.success;
+        else this.success_callback = null;
+        if (conf && conf.error) this.error_callback = conf.error;
+        else this.error_callback = null;
+
         aapi({
             url: this.url,
             method: this.method,
             data: this.data,
         },
-        conf && conf.success ? conf.success : this.onload,
-        conf && conf.error ? conf.error : this.onerror);
+        this.onload,
+        this.onerror);
     }
     onload = (response) => {
         this.load = true;
@@ -1095,7 +1117,7 @@ class Ijs {
         let model = null;
         if (this.model && this.model !== '*') {
             model = response && response[this.model] ? response[this.model] : null;
-        } else {
+        } else if (this.model === '*') {
             model = response;
         }
         if (model) {
@@ -1107,6 +1129,7 @@ class Ijs {
                 id: this.id
             });
         }
+        if (this.success_callback) this.success_callback(response);
     }
     dataInit({model, id}) {
         window.ijs.models.add({
@@ -1123,6 +1146,7 @@ class Ijs {
             model: null,
             id: this.id
         });
+        if (this.error_callback) this.error_callback(status, response);
     }
   }
 
@@ -1472,10 +1496,10 @@ function IjsForDom(conf, self) {
 IjsForDom.prototype.ReInit = function() {
     const items = this.self.GetData({ name: this.data, pref: this.path });
     if (!items) {
-        console.error(`${this.data} not find`);
+        // console.error(`${this.data} not find`);
         return;
     } else if (!Array.isArray(items)) {
-        console.error(`${this.data} not array`);
+        // console.error(`${this.data} not array`);
         return;
     }
     this.node.innerHTML = '';
@@ -1528,57 +1552,32 @@ IjsEventDom.prototype.RemoveEvent = function () {
 }
 IjsEventDom.prototype.AddEvent = function() {
     if (this.nodeName === 'click') {
-        this.node.addEventListener('click', () => { this.DefClick(); });
+        this.node.addEventListener('click', (e) => { this.DefClick(e); });
     } else if (this.nodeName === 'hover') {
-        this.node.addEventListener('mouseenter', () => { this.DefClick(); });
+        this.node.addEventListener('mouseenter', (e) => { this.DefClick(e); });
     } else if (this.nodeName === 'thisclick') {
         this.node.addEventListener('click', (e) => { this.ThisClick(e); });
     } else if (this.nodeName === 'keyup') {
         this.node.addEventListener('keyup', (e) => { this.KeyEvent(e); });
     } else if (this.nodeName === 'change') {
         this.node.addEventListener('change', (e) => { this.KeyEvent(e); });
+    } else if (this.nodeName === 'focus') {
+        this.node.addEventListener('focus', (e) => { this.KeyEvent(e); });
+    } else if (this.nodeName === 'blur') {
+        this.node.addEventListener('blur', (e) => { this.KeyEvent(e); });
     }
 }
 IjsEventDom.prototype.KeyEvent = function(e) {
-    this.self.models.add({
-        model: {
-            altKey: e.altKey,
-            bubbles: e.bubbles,
-            cancelBubble: e.cancelBubble,
-            cancelable: e.cancelable,
-            charCode: e.charCode,
-            code: e.code,
-            composed: e.composed,
-            ctrlKey: e.ctrlKey,
-            // currentTarget: e.currentTarget,
-            defaultPrevented: e.defaultPrevented,
-            detail: e.detail,
-            eventPhase: e.eventPhase,
-            isComposing: e.isComposing,
-            isTrusted: e.isTrusted,
-            key: e.key,
-            keyCode: e.keyCode,
-            location: e.location,
-            metaKey: e.metaKey,
-            repeat: e.repeat,
-            returnValue: e.returnValue,
-            shiftKey: e.shiftKey,
-            timeStamp: e.timeStamp,
-            type: e.type,
-            which: e.which
-        },
-        id: '$event',
-        clean: true
-    });
+    this.self.models.items.$event.$event = e;
     this.ClickEvent();
 }
 IjsEventDom.prototype.DefClick = function(e) {
-    // this.models.items.$event.$event = e;
+    this.self.models.items.$event.$event = e;
     this.ClickEvent();
 }
 IjsEventDom.prototype.ThisClick = function(e) {
     if (e.target != this.node) return;
-    // this.models.items.$event.$event = e;
+    this.self.models.items.$event.$event = e;
     this.ClickEvent();
 }
 IjsEventDom.prototype.ClickEvent = function() {
@@ -1618,7 +1617,7 @@ IjsEventDom.prototype.ClickEvent = function() {
                     pref: this.path
                 });
                 if (!params) return;
-                this.api(params[1]).send();
+                this.self.api(params[1]).send();
             }
         }
         if (!is_set) {
