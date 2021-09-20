@@ -13,13 +13,13 @@ function iJS (conf = null) {
 }
 function Ijs() {
     window.state = {};
-    this.textContentReg = new RegExp("{([\s\S]*?)}",'gm');// /{([\s\S]*?)}/gm;
-    this.numberReg = new RegExp("\.([0-9]*?)\.",'gm');// /\.([0-9]*?)\./gm;
-    this.classPathReg = new RegExp("{{([\s\S]*?)}}",'gm');// /{{([\s\S]*?)}}/gm;
-    this.paramsReg = new RegExp("\(([\s\S][^(]*?)\)",'gm');// /\(([\s\S][^(]*?)\)/gm;
-    this.maksParamsReg = new RegExp("\((.*)\)",'gm');// /\((.*)\)/gm;
-    this.maksKeysReg = new RegExp("\[(.*)\]",'gm');// /\[(.*)\]/gm;
-    this.funcReg = new RegExp("^([\s\S]*?)\(",'gm');// /^([\s\S]*?)\(/gm;
+    this.textContentReg = /{([\s\S]*?)}/gm;
+    this.numberReg = /\.([0-9]*?)\./gm;
+    this.classPathReg = /{{([\s\S]*?)}}/gm;
+    this.paramsReg = /\(([\s\S][^(]*?)\)/gm;
+    this.maksParamsReg = /\((.*)\)/gm;
+    this.maksKeysReg = /\[(.*)\]/gm;
+    this.funcReg = /^([\s\S]*?)\(/gm;
 
     this.apis = {
         objects: [],
@@ -970,7 +970,7 @@ function Ijs_API(api, self) {
     this.active = true;
     this.timerId = null;
     this.sendTimerId = null;
-    this.dataPathReg = new RegExp("{{([\s\S]*?)}}",'gm');// /{{([\s\S]*?)}}/gm;
+    this.dataPathReg = /{{([\s\S]*?)}}/gm;
     this.url = api.url;
     this.method = api.method;
     this.action = api.action;
@@ -1491,11 +1491,11 @@ function IjsForDom(conf, self) {
     this.three_id = conf.three_id ? conf.three_id : null;
     this.parent_id = conf.parent_id ? conf.parent_id : null;
     this.self = self;
-    this.textContentReg = new RegExp("{([\s\S]*?)}",'gm');// /{([\s\S]*?)}/gm;
-    this.paramsReg = new RegExp("\(([\s\S]*?)\)",'gm');// /\(([\s\S]*?)\)/gm;
-    this.maksParamsReg = new RegExp("\((.*)\)",'gm');// /\((.*)\)/gm;
-    this.maksContentReg = new RegExp("{(.*)}",'gm');// /{(.*)}/gm;
-    this.funcReg = new RegExp("^([\s\S]*?)\(",'gm');// /^([\s\S]*?)\(/gm;
+    this.textContentReg = /{([\s\S]*?)}/gm;
+    this.paramsReg = /\(([\s\S]*?)\)/gm;
+    this.maksParamsReg = /\((.*)\)/gm;
+    this.maksContentReg = /{(.*)}/gm;
+    this.funcReg = /^([\s\S]*?)\(/gm;
     
     this.helpNode = document.createElement('DIV');
     this.nodes = [];
@@ -1559,7 +1559,7 @@ function IjsEventDom(conf, self) {
     this.three_id = conf.three_id ? conf.three_id : null;
     this.parent_id = conf.parent_id ? conf.parent_id : null;
     this.self = self;
-    this.funcReg = new RegExp("^([\s\S]*?)\(",'gm');// /^([\s\S]*?)\(/gm;
+    this.funcReg = /^([\s\S]*?)\(/gm;
     this.AddEvent();
 }
 IjsEventDom.prototype.RemoveEvent = function () {
@@ -1732,8 +1732,8 @@ function IjsIfDom(conf, self) {
     this.three_id = conf.three_id ? conf.three_id : null;
     this.parent_id = conf.parent_id ? conf.parent_id : null;
     this.self = self;
-    this.textContentReg = new RegExp("{([\s\S]*?)}",'gm');// /{([\s\S]*?)}/gm;
-    this.paramsReg = new RegExp("\(([\s\S]*?)\)",'gm');// /\(([\s\S]*?)\)/gm;
+    this.textContentReg = /{([\s\S]*?)}/gm;
+    this.paramsReg = /\(([\s\S]*?)\)/gm;
     this.nodes = [];
     this.helpNode = document.createElement('DIV');
 
