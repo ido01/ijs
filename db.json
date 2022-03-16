@@ -1,1 +1,23 @@
-
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "Name Surname",
+      "type": "pro",
+      "rate": 4.3,
+      "phone": "88007553535",
+      "reg": "POFIG",
+      "avatar": [
+        {
+          "name": "Mellie.jpg",
+          "percent": 100,
+          "size": 40088,
+          "status": "done",
+          "type": "image/jpeg",
+          "uid": "rc-upload-1647453963163",
+          "url": "https://cdn.fakercloud.com/avatars/guillemboti_128.jpg"
+        }
+      ]
+    }
+  ]
+}
