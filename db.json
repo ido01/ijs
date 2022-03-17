@@ -1,23 +1,52 @@
 {
-  "users": [
-    {
-      "id": 1,
-      "name": "Name Surname",
-      "type": "pro",
-      "rate": 4.3,
-      "phone": "88007553535",
-      "reg": "POFIG",
-      "avatar": [
-        {
-          "name": "Mellie.jpg",
-          "percent": 100,
-          "size": 40088,
-          "status": "done",
-          "type": "image/jpeg",
-          "uid": "rc-upload-1647453963163",
-          "url": "https://cdn.fakercloud.com/avatars/guillemboti_128.jpg"
-        }
-      ]
-    }
-  ]
-}
+    "users": [
+      {
+        "id": "1",
+        "phone": "88007553535",
+        "email": "test@test.com",
+        "firstname": "Ivan",
+        "lastname": "Ivanov",
+        "description": "gg",
+        "isPassportConfirmed": true,
+        "cityId": "22",
+        "createdAt": "2020-02-18 12:55:31",
+        "rating": {
+            "id": "2",
+            "userId": "1",
+            "one": 0,
+            "two": 1,
+            "three": 3,
+            "four": 16,
+            "five": 218,
+            "createdAt": "2020-02-18 12:55:31"
+        },
+        "avatar": {
+            "id": "3",
+            "userId": "1",
+            "name": "avatar.jpg",
+            "path": "https://sun1.is74.userapi.com/s/v1/ig2/clro14OBWmOD3LDpXhcgI-nwfHwK-tecVIWbSK_b5A5B4ZtEro8KuLNABr4dAq8MemoPDLyswdKwWrFKGYf3IcIy.jpg?size=400x400&quality=96&crop=574,288,1411,1411&ava=1",
+            "createdAt": "2020-02-18 12:55:31"
+        },
+        "userSubscriptionPlan": {
+            "id": "4",
+            "userId": "1",
+            "subscriptionPlanId": "1",
+            "createdAt": "2020-02-18 12:55:31"
+        },
+        "ownerReviews": [
+            {
+                "id": "5",
+                "grade": 5,
+                "createdAt": "2020-02-18 12:55:31"
+            }
+        ],
+        "targetReview": [
+            {
+                "id": "5",
+                "grade": 5,
+                "createdAt": "2020-02-18 12:55:31"
+            }
+        ] 
+      }
+    ]
+  }
