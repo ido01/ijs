@@ -10,6 +10,7 @@
         "isPassportConfirmed": true,
         "cityId": "22",
         "createdAt": "2020-02-18 12:55:31",
+        "current_rating": 4.3,
         "rating": {
             "id": "2",
             "userId": "1",
